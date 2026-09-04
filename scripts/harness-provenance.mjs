@@ -15,6 +15,7 @@ import {
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
+import { adaptHarnessConversationSource, CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 
 export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
 export const HARNESS_VERSION = '0.1.0-rc.7'
@@ -266,6 +267,10 @@ export function materializeHarnessDesktopRuntime(root) {
     if (!existsSync(sourceLib)) throw new Error(`pinned Harness build is missing emitted lib for ${manifest.name}`)
     rmSync(targetLib, { recursive: true, force: true })
     cpSync(sourceLib, targetLib, { recursive: true, errorOnExist: true })
+    if (manifest.name === CONVERSATION_PACKAGE) {
+      const client = join(targetLib, 'client.js')
+      writeFileSync(client, adaptHarnessConversationSource(readFileSync(client, 'utf8')))
+    }
     const overlay = DESKTOP_OVERLAYS.get(manifest.name)
     if (overlay !== undefined) {
       const targetDirectory = relative(root, target).split(sep).join('/')
@@ -294,12 +299,18 @@ function desktopProvenance(root, receipt) {
     const targetLib = join(target, 'lib')
     if (!existsSync(sourceLib) || !existsSync(targetLib)) throw new Error(`Desktop Harness lib is missing: ${manifest.name}`)
     const overlay = DESKTOP_OVERLAYS.get(manifest.name)
+    const adapter = manifest.name === CONVERSATION_PACKAGE ? CONVERSATION_ADAPTER_PATH : null
+    if (adapter !== null && readFileSync(join(targetLib, 'client.js'), 'utf8')
+      !== adaptHarnessConversationSource(readFileSync(join(sourceLib, 'client.js'), 'utf8'))) {
+      throw new Error('Desktop conversation package does not match the pinned native owner plus product adapter')
+    }
     packages.push({
       name: manifest.name,
       resolved: relative(root, target).split(sep).join('/'),
       source: relative(harnessRoot, source.path).split(sep).join('/'),
       source_lib_sha256: hashDirectory(sourceLib),
       resolved_lib_sha256: hashDirectory(targetLib),
+      adapter: adapter === null ? null : { path: adapter, sha256: sha256(readFileSync(join(root, adapter))) },
       overlay: overlay === undefined ? null : {
         path: overlay,
         sha256: sha256(readFileSync(join(root, overlay))),

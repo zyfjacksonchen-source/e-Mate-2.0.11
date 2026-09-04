@@ -205,6 +205,10 @@ test('version gates match the release contract', () => {
 })
 
 test('runtime resolves only the exact Harness source', () => {
+  const source = readFileSync(new URL('../src/e-mate.ts', import.meta.url), 'utf8')
+  const packaged = source.slice(source.indexOf('function harnessFromPackage()'), source.indexOf('export function resolveHarness()'))
+  for (const field of ['conversation_adapter_sha256', 'conversation_client_sha256']) assert.ok(packaged.includes(field))
+  assert.match(packaged, /throw new Error\('e-Mate packaged conversation adapter provenance is missing or mismatched'\)/u)
   const runtime = resolveHarness()
   assert.equal(HARNESS_COMMIT, '4da69d7c3522ee51de12822c917c503a124f7a7d')
   assert.equal(runtime.version, HARNESS_VERSION)

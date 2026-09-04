@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 
 const FS_OLD = `\tasync resolvePolicy(toolName, args, exec) {
 \t\tvalidateEscalationArgs(args.sandbox_permissions, args.justification);
@@ -24,4 +25,6 @@ export async function applyHarnessRuntimeAdapters(runtimeRoot) {
   const packageEntry = name => join(runtimeRoot, 'node_modules', '@deepseek-ai', name, 'lib', 'index.js')
   const fsTarget = packageEntry('dsh-tool-fs')
   await writeFile(fsTarget, adaptHarnessFsSource(await readFile(fsTarget, 'utf8')))
+  const conversationTarget = join(runtimeRoot, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')
+  await writeFile(conversationTarget, adaptHarnessConversationSource(await readFile(conversationTarget, 'utf8')))
 }

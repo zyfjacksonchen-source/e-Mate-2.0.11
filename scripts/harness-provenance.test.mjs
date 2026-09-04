@@ -16,9 +16,20 @@ import {
   runHarnessBuildScripts,
 } from './harness-provenance.mjs'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
+import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const harnessRoot = join(root, 'upstream', 'deepseek-harness')
+
+test('runtime and Desktop materialization share the conversation owner adapter and record its provenance', () => {
+  const runtime = readFileSync(join(root, 'scripts/harness-runtime-adapters.mjs'), 'utf8')
+  const desktop = readFileSync(join(root, 'scripts/harness-provenance.mjs'), 'utf8')
+  assert.equal(CONVERSATION_PACKAGE, '@deepseek-ai/dsh-client-ui-conversation')
+  assert.equal(CONVERSATION_ADAPTER_PATH, 'scripts/harness-conversation-adapter.mjs')
+  assert.match(runtime, /adaptHarnessConversationSource\(await readFile\(conversationTarget/u)
+  assert.match(desktop, /adaptHarnessConversationSource\(readFileSync\(client/u)
+  assert.match(desktop, /adapter: adapter === null \? null : \{ path: adapter, sha256:/u)
+})
 
 test('pins one clean native model-directory refresh owner', () => {
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: harnessRoot, encoding: 'utf8' }).trim(), HARNESS_COMMIT)
