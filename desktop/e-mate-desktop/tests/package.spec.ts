@@ -162,9 +162,11 @@ describe('published package surface', () => {
     expect(config).toContain("entryFileNames: 'preload.cjs'")
   })
 
-  it('keeps target Python preparation out of the portable Base SDK build', () => {
+  it('keeps target Python preparation out of portable source checks', () => {
     expect(manifest.scripts?.build).toBe('yarn run prepare:python && yarn run build:sdk')
     expect(manifest.scripts?.['build:sdk']).not.toContain('prepare:python')
+    expect(manifest.scripts?.['check:source']).toBe('yarn run build:sdk && yarn run typecheck && yarn run test && yarn run verify:closure && yarn run verify:cli && yarn run verify:loader && yarn run verify:profile && yarn run verify:licenses')
+    expect(manifest.scripts?.check).toBe('yarn run prepare:python && yarn run check:source')
   })
 
   it('installs Host command PATHs after the launch snapshot and before profile boot', () => {
@@ -333,7 +335,7 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run verify:closure')
     expect(manifest.scripts?.['test:windows-update-transaction']).toBeUndefined()
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
-    expect(manifest.scripts?.check).toContain('yarn run verify:cli')
+    expect(manifest.scripts?.['check:source']).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac']).toBe('yarn workspace @e-mate/desktop dist:mac')
     expect(workspaceManifest.scripts?.['dist:mac-unsigned-release']).toBeUndefined()
     expect(workspaceManifest.scripts?.['dist:mac-smoke']).toBeUndefined()
