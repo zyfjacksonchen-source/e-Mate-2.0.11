@@ -19,6 +19,7 @@ import { createSessionTokenVerifier } from './session-auth.ts';
 
 type ProductionConfiguration = {
   schemaVersion: 1;
+  publicBaseUrl: string;
   listen: {
     host: string;
     port: number;
@@ -52,6 +53,7 @@ type ProductionConfiguration = {
 
 type LoadedProductionConfiguration = {
   configurationSha256: string;
+  publicBaseUrl: string;
   host: string;
   port: number;
   certificate: Buffer;
@@ -111,6 +113,21 @@ function text(value: unknown, label: string, maximum = 256): string {
     throw new Error(`Invalid ${label}`);
   }
   return value;
+}
+
+function publicBaseUrl(value: unknown): string {
+  let url: URL;
+  try {
+    url = new URL(text(value, 'public base URL', 2_048));
+  } catch {
+    throw new Error('Invalid public base URL');
+  }
+  const path = url.pathname.replace(/\/+$/u, '');
+  if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.search || url.hash || path.endsWith('/v1')) {
+    throw new Error('Invalid public base URL');
+  }
+  url.pathname = path;
+  return url.toString().replace(/\/+$/u, '');
 }
 
 function integer(value: unknown, label: string, minimum: number, maximum: number): number {
@@ -594,6 +611,7 @@ function parseConfiguration(value: unknown): ProductionConfiguration {
     input,
     [
       'schemaVersion',
+      'publicBaseUrl',
       'listen',
       'auth',
       'usage',
@@ -632,6 +650,7 @@ function parseConfiguration(value: unknown): ProductionConfiguration {
   }
   return {
     schemaVersion: 1,
+    publicBaseUrl: publicBaseUrl(input.publicBaseUrl),
     listen: {
       host: text(listen.host, 'listen host', 253),
       port: integer(listen.port, 'listen port', 1, 65_535),
@@ -752,6 +771,7 @@ export function loadProductionConfiguration(configurationFile: string): LoadedPr
   }
   return {
     configurationSha256: createHash('sha256').update(raw).digest('hex'),
+    publicBaseUrl: configuration.publicBaseUrl,
     host: configuration.listen.host,
     port: configuration.listen.port,
     certificate,
@@ -799,6 +819,7 @@ export async function startProductionModelGateway(configurationFile: string): Pr
     const routeIds = configuration.routes.map(({ id }) => id);
     const handler = createModelGatewayHandler({
       routes: configuration.routes,
+      publicBaseUrl: configuration.publicBaseUrl,
       authenticate: createProductionAuthenticator(configuration.authenticate, modelRoutePolicy.policy, database.store, routeIds),
       tenantModelRoutePolicy: modelRoutePolicy.policy,
       usageStore: database.store,

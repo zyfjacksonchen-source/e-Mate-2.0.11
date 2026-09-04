@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { modelRouteIdsFromCatalog, parseProductionConfig, validatePostgresUrl } from '../src/production.ts';
 
+const modelGatewayBaseUrl = 'https://mvdcm.ecoremedia.net/e-mate/model-api';
+
 function validConfig(): Record<string, unknown> {
   return {
     schemaVersion: 1,
@@ -19,7 +21,7 @@ function validConfig(): Record<string, unknown> {
       refreshLifetimeSeconds: 2_592_000,
     },
     modelGateway: {
-      baseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api',
+      baseUrl: modelGatewayBaseUrl,
       audience: 'e-mate-model-gateway',
       usageKeyId: 'usage-2026-08',
       usagePublicKeyFile: '/run/e-mate/usage-public.pem',
@@ -50,24 +52,30 @@ test('production configuration rejects unknown fields, insecure URLs, and duplic
   assert.throws(() => parseProductionConfig(duplicate), /Duplicate organization/);
 });
 
-test('Auth model ids come only from the shared Model Gateway route catalog', () => {
+test('Auth model ids and issued base URL agree with the shared Model Gateway catalog', () => {
+  const catalog = {
+    schemaVersion: 1,
+    publicBaseUrl: modelGatewayBaseUrl,
+    routes: [
+      { id: 'gemini-3.1-pro' },
+      { id: 'gpt-5.6-luna' },
+      { id: 'deepseek-web-search' },
+      { id: 'gpt-image-2-pro' },
+    ],
+  };
   assert.deepEqual(
-    modelRouteIdsFromCatalog({
-      schemaVersion: 1,
-      routes: [
-        { id: 'gemini-3.1-pro' },
-        { id: 'gpt-5.6-luna' },
-        { id: 'deepseek-web-search' },
-        { id: 'gpt-image-2-pro' },
-      ],
-    }),
+    modelRouteIdsFromCatalog(catalog, modelGatewayBaseUrl),
     ['gemini-3.1-pro', 'gpt-5.6-luna', 'gpt-image-2-pro']
   );
-  assert.throws(() => modelRouteIdsFromCatalog({ routes: [] }), /route catalog/);
-  assert.throws(() => modelRouteIdsFromCatalog({ routes: [{ id: 'deepseek-web-search' }] }), /route catalog/);
-  assert.throws(() => modelRouteIdsFromCatalog({ routes: [{ id: 'e-mate-faux' }] }), /route id/);
   assert.throws(
-    () => modelRouteIdsFromCatalog({ routes: [{ id: 'gpt-5.6-sol' }, { id: 'gpt-5.6-sol' }] }),
+    () => modelRouteIdsFromCatalog({ ...catalog, publicBaseUrl: 'https://gateway.example.test' }, modelGatewayBaseUrl),
+    /public base URL mismatch/
+  );
+  assert.throws(() => modelRouteIdsFromCatalog({ publicBaseUrl: modelGatewayBaseUrl, routes: [] }, modelGatewayBaseUrl), /route catalog/);
+  assert.throws(() => modelRouteIdsFromCatalog({ publicBaseUrl: modelGatewayBaseUrl, routes: [{ id: 'deepseek-web-search' }] }, modelGatewayBaseUrl), /route catalog/);
+  assert.throws(() => modelRouteIdsFromCatalog({ publicBaseUrl: modelGatewayBaseUrl, routes: [{ id: 'e-mate-faux' }] }, modelGatewayBaseUrl), /route id/);
+  assert.throws(
+    () => modelRouteIdsFromCatalog({ publicBaseUrl: modelGatewayBaseUrl, routes: [{ id: 'gpt-5.6-sol' }, { id: 'gpt-5.6-sol' }] }, modelGatewayBaseUrl),
     /Duplicate/
   );
 });

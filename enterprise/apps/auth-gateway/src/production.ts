@@ -232,8 +232,11 @@ export function validatePostgresUrl(value: string, mode: 'internal-plaintext' | 
   return value;
 }
 
-export function modelRouteIdsFromCatalog(value: unknown): string[] {
+export function modelRouteIdsFromCatalog(value: unknown, expectedPublicBaseUrl: string): string[] {
   const catalog = object(value, 'Model Gateway route catalog');
+  if (httpsUrl(catalog.publicBaseUrl, 'Model Gateway public base URL') !== httpsUrl(expectedPublicBaseUrl, 'Model Gateway URL')) {
+    throw new Error('Model Gateway public base URL mismatch');
+  }
   if (!Array.isArray(catalog.routes) || catalog.routes.length < 1 || catalog.routes.length > 20) {
     throw new Error('Invalid Model Gateway route catalog');
   }
@@ -287,7 +290,8 @@ export async function startProductionAuthGateway(configPath: string): Promise<{
   });
   try {
     const modelRouteIds = modelRouteIdsFromCatalog(
-      JSON.parse(readFileSync(config.modelGateway.routeCatalogFile, 'utf8')) as unknown
+      JSON.parse(readFileSync(config.modelGateway.routeCatalogFile, 'utf8')) as unknown,
+      config.modelGateway.baseUrl
     );
     const store = new PostgresAuthStore(pool, {
       refreshDerivationSecret: refreshSecret,

@@ -78,6 +78,7 @@ const managedCodexModelIds = new Set([
   'doubao-seed-2-0-pro-260215',
 ]);
 const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17']);
+const modelSessionJwtPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
 const deepSeekSearchCredentialRouteId = 'deepseek-web-search';
 const deepSeekSearchProviderId = 'deepseek-official';
@@ -944,6 +945,7 @@ export class InMemoryUsageStore implements UsageStore {
 export type ModelGatewayOptions = {
   routes: ModelGatewayRoute[];
   authenticate(token: string): Promise<ModelGatewayPrincipal | null>;
+  publicBaseUrl?: string;
   tenantModelRoutePolicy?: TenantModelRoutePolicy;
   usageStore: UsageStore;
   usageKeyId: string;
@@ -994,10 +996,9 @@ function bearer(request: IncomingMessage): string {
 }
 
 async function principal(
-  request: IncomingMessage,
+  token: string,
   authenticate: ModelGatewayOptions['authenticate']
 ): Promise<ModelGatewayPrincipal> {
-  const token = bearer(request);
   let value: ModelGatewayPrincipal | null;
   try {
     value = await authenticate(token);
@@ -1017,6 +1018,35 @@ async function principal(
     throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required');
   }
   return value;
+}
+
+function legacyRuntimeGatewayRoute(publicBaseUrl: string | undefined): {
+  upstreamBaseUrl: string;
+  allowInsecureHttpUpstream?: true;
+} {
+  let url: URL;
+  try {
+    url = new URL(publicBaseUrl ?? '');
+  } catch {
+    throw new HttpError(503, 'RUNTIME_MODEL_COMPATIBILITY_UNAVAILABLE', 'Runtime model compatibility unavailable');
+  }
+  const loopbackHttp = url.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(url.hostname);
+  const path = url.pathname.replace(/\/+$/u, '');
+  if (
+    (!loopbackHttp && url.protocol !== 'https:') ||
+    !url.hostname ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    path.endsWith('/v1') ||
+    /\p{Cc}/u.test(publicBaseUrl ?? '')
+  ) {
+    throw new HttpError(503, 'RUNTIME_MODEL_COMPATIBILITY_UNAVAILABLE', 'Runtime model compatibility unavailable');
+  }
+  url.pathname = path;
+  const root = url.toString().replace(/\/+$/u, '');
+  return { upstreamBaseUrl: `${root}/v1`, ...(loopbackHttp ? { allowInsecureHttpUpstream: true } : {}) };
 }
 
 function principalAllowsRoute(identity: ModelGatewayPrincipal, routeId: string): boolean {
@@ -2011,7 +2041,8 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       )) {
         throw new HttpError(400, 'INVALID_REQUEST', 'Query is not allowed');
       }
-      const identity = await principal(request, options.authenticate);
+      const modelSessionToken = bearer(request);
+      const identity = await principal(modelSessionToken, options.authenticate);
       if (url.pathname === '/v1/consents/current') {
         if (request.method !== 'GET') return method(response, 'GET');
         if (!options.consentStore) {
@@ -2106,7 +2137,13 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         if (clientVersion !== null && !runtimeModelsClientVersions.has(clientVersion)) {
           throw new HttpError(400, 'UNSUPPORTED_CLIENT_VERSION', 'Unsupported runtime models client version');
         }
-        const searchGrantRequested = clientVersion !== null;
+        const effectiveClientVersion = clientVersion ?? '2.0.12';
+        const legacyClient = effectiveClientVersion !== '2.0.17';
+        if (legacyClient && (identity.sessionId === undefined || !modelSessionJwtPattern.test(modelSessionToken))) {
+          throw new HttpError(403, 'MODEL_SESSION_REQUIRED', 'A model session is required');
+        }
+        const legacyGatewayRoute = legacyClient ? legacyRuntimeGatewayRoute(options.publicBaseUrl) : undefined;
+        const searchGrantRequested = effectiveClientVersion !== '2.0.12';
         let searchGrantStatus: 'granted' | 'denied' | 'unavailable' = 'unavailable';
         let searchApiKey: string | undefined;
         if (searchGrantRequested) {
@@ -2152,6 +2189,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
                     reasoning: route.reasoning,
                     contextWindow: route.contextWindow,
                     maxTokens: route.maxTokens,
+                    ...(legacyGatewayRoute ? { ...legacyGatewayRoute, upstreamApiKey: modelSessionToken } : {}),
                   }
                 : null
             )
