@@ -835,8 +835,9 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-303",
       "write_set": [
         "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.tsx",
-        "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
-        "packages/dsh/profile/plugins/emate-shell/tests/**"
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.module.css",
+        "packages/dsh/profile/plugins/emate-shell/tests/image-batch-progress.client.spec.tsx",
+        "docs/2.0.17/work-orders.json"
       ],
       "implementation": [
         "batch terminal 后不新增第二个终态节点；同一组件切换到 final Gallery 状态。",
@@ -849,10 +850,10 @@
         "4 成功 1 失败不会把成功图隐藏。"
       ],
       "tests": [
-        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/image-batch-client.client.spec.tsx tests/image-batch-progress.client.spec.tsx tests/image-gallery.client.spec.tsx (from packages/dsh/profile/plugins/emate-shell)",
         "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
       ],
-      "rollback": "恢复 progress-only 显示；数据不变。",
+      "rollback": "移除原位终态摘要样式与断言；EM302 live cards 与 exact pointer filtering 保留。",
       "risk": "高"
     },
     {

@@ -76,6 +76,29 @@
   font-size: 12px;
 }
 
+.failures {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.failures strong {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+
+.failures ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-inline-start: 20px;
+}
+
 @keyframes image-batch-pulse {
   50% { opacity: 0.45; }
 }

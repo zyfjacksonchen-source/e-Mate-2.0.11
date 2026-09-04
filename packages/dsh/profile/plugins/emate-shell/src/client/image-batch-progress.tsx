@@ -32,6 +32,13 @@ const stateLabels: Readonly<Record<ImageBatchClientTaskState, string>> = {
   interrupted: '未开始',
 }
 
+const batchStatusLabels = {
+  completed: '全部完成',
+  partial: '部分完成',
+  failed: '失败',
+  cancelled: '已取消',
+} as const
+
 const imageLabels = {
   image: '图像',
   open: '查看原图',
@@ -106,18 +113,35 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, useSessions,
 export function ImageBatchProgress({ batches, useSessions, loadImage }: ImageBatchProgressProps) {
   if (batches.length === 0) return null
   return <div className={css.root} aria-live="polite" aria-label="图片批次进度">
-    {batches.map(batch => <section
-      key={batch.batchId}
-      className={css.batch}
-      aria-label={'图片批次，共 ' + batch.tasks.length + ' 张'}
-      aria-busy={!batch.terminal}
-      data-batch-id={batch.batchId}
-    >
-      <div className={css.grid} role="list">
-        {batch.tasks.map(task => <div key={task.taskId} role="listitem">
-          <ImageBatchTaskCard task={task} useSessions={useSessions} loadImage={loadImage} />
-        </div>)}
-      </div>
-    </section>)}
+    {batches.map(batch => {
+      const failures = batch.tasks.filter(task => task.terminal && task.state !== 'completed')
+      const batchLabel = '图片批次，共 ' + batch.tasks.length + ' 张'
+        + (batch.status === undefined ? '' : '，' + batchStatusLabels[batch.status])
+      return <section
+        key={batch.batchId}
+        className={css.batch}
+        aria-label={batchLabel}
+        aria-busy={!batch.terminal}
+        data-batch-id={batch.batchId}
+      >
+        <div className={css.grid} role="list">
+          {batch.tasks.map(task => <div key={task.taskId} role="listitem">
+            <ImageBatchTaskCard task={task} useSessions={useSessions} loadImage={loadImage} />
+          </div>)}
+        </div>
+        {batch.terminal && failures.length > 0 && <section
+          className={css.failures}
+          aria-label={'批次未完成项目：' + failures.length + ' 项'}
+        >
+          <strong>未完成 {failures.length} 项</strong>
+          <ul>
+            {failures.map(task => <li key={task.taskId}>
+              图片 {task.ordinal}：{stateLabels[task.state]}
+              {task.failureCode === undefined ? '' : '（代码：' + task.failureCode + '）'}
+            </li>)}
+          </ul>
+        </section>}
+      </section>
+    })}
   </div>
 }
