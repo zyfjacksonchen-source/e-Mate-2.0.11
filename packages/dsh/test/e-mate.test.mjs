@@ -1148,7 +1148,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     imageGenerationSource.indexOf('function validVerification'),
   )
   assert.match(verifiedProducer, /revision: 2/u)
-  assert.match(verifiedProducer, /semantic: sameSource ? 'failed' : 'not-applicable'/u)
+  assert(verifiedProducer.includes("semantic: sameSource ? 'failed' : 'not-applicable'"))
   assert.doesNotMatch(verifiedProducer, /human_review|needs-review|reviewDecision|revision: 3/u)
   assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image-2-pro'/gu)?.length, 1)
   assert.equal(imageGenerationSource.match(/await request\(endpoint\(root, path\)/gu)?.length, 1)
