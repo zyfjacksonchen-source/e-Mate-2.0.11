@@ -265,6 +265,28 @@ for (const required of ['created/unlinked', 'interrupted/not-submitted', 'linked
   assert(recovery107.includes(required), 'EM217-107 missing recovery rule: ' + required)
 }
 assert(!recovery107.includes('queued task 重新启动'))
+assert(recovery107.includes('durable projection'))
+assert(recovery107.includes('native Session/Job'))
+assert(recovery107.includes('legacy label/time fallback'))
+assert(recovery107.includes('publicBatch view'))
+assert(recovery107.includes('image_evidence/failures'))
+assert(recovery107.includes('accepted_events'))
+for (const required of ['flush true', 'refold', 'exact native session not-found', 'storage outage', 'malformed projection', 'normalized call args', 'operation/sources', 'revision-2/3 history', '不得写 receipt pointer/image', 'running/needs-review-only', 'recorded/not-submitted/unknown', 'evidence/failures 集合完整', 'ordinal 1..N', 'parent receipt revision 仅 2..3']) {
+  assert(recovery107.includes(required), 'EM217-107 missing strict recovery rule: ' + required)
+}
+assert.deepEqual(t('EM217-107').write_set, [
+  'packages/dsh/src/profile/image-batch-recovery.ts',
+  'packages/dsh/src/profile/image-batch-events.ts',
+  'packages/dsh/src/profile/native-image-task-runner.ts',
+  'packages/dsh/src/profile/image-generation.ts',
+  'packages/dsh/test/*recovery*',
+  'packages/dsh/test/image-batch-events.test.mjs',
+  'packages/dsh/test/image-batch-receipt-correlation.test.mjs',
+  'packages/dsh/test/native-image-task-runner.test.mjs',
+  'packages/dsh/test/image-batch-worker-stress.test.mjs',
+  'docs/2.0.17/work-orders.json',
+  'docs/2.0.17/check-plan.mjs',
+])
 const latency108 = t('EM217-108')
 assert.equal(latency108.owner, 'IMG')
 assert.equal(latency108.evidence_owner, 'QA')

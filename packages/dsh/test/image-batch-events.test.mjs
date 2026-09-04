@@ -100,7 +100,29 @@ function schemaNode(kind, properties = {}) {
     min(value) { this.minimum = value; return this },
     max(value) { this.maximum = value; return this },
     regex(value) { this.pattern = value; return this },
+    refine(check, message) { this.refinement = { check, message }; return this },
+    parse(value) { parseSchema(this, value); return value },
   }
+}
+function parseSchema(schema, value) {
+  if (schema.isOptional && value === undefined) return
+  if (schema.kind === 'array') {
+    assert(Array.isArray(value)); if (schema.minimum !== undefined) assert(value.length >= schema.minimum)
+    if (schema.maximum !== undefined) assert(value.length <= schema.maximum)
+    for (const item of value) parseSchema(schema.item, item)
+  } else if (schema.kind === 'object') {
+    assert(value !== null && typeof value === 'object' && !Array.isArray(value))
+    if (schema.isStrict) assert(Object.keys(value).every(key => Object.hasOwn(schema.shape, key)))
+    for (const [key, child] of Object.entries(schema.shape)) parseSchema(child, value[key])
+  } else if (schema.kind === 'string') {
+    assert.equal(typeof value, 'string'); if (schema.minimum !== undefined) assert(value.length >= schema.minimum)
+    if (schema.maximum !== undefined) assert(value.length <= schema.maximum); if (schema.pattern !== undefined) assert(schema.pattern.test(value))
+  } else if (schema.kind === 'number') {
+    assert.equal(typeof value, 'number'); if (schema.isInteger) assert(Number.isInteger(value))
+    if (schema.minimum !== undefined) assert(value >= schema.minimum); if (schema.maximum !== undefined) assert(value <= schema.maximum)
+  } else if (schema.kind === 'enum') assert(schema.values.includes(value))
+  else if (schema.kind === 'literal') assert.equal(value, schema.value)
+  if (schema.refinement !== undefined) assert(schema.refinement.check(value), schema.refinement.message)
 }
 const z = {
   array: item => schemaNode('array', { item }),
@@ -185,6 +207,7 @@ test('receipt validation is pointer-only and state-specific', () => {
   for (const mutate of [
     task => { task.receipt.attachment = { attachmentId: A } },
     task => { task.receipt.owner_session_id = 'other-child' },
+    task => { task.receipt.revision = 1 },
     task => { task.receipt.revision = 4 },
     task => { task.receipt.event_seq = -1 },
     task => { task.receipt.status = 'needs-review' },
@@ -307,52 +330,72 @@ test('whole snapshots preserve proven image pointers on failed tasks in both ima
   assert(!JSON.stringify(view).includes('attachment'))
 })
 
-test('projection builds a strict full nested checkpoint schema without record unknown escape hatches', () => {
-  const stateSchema = imageBatchProjectionDefinition(z, SESSION).schema
-  assert.equal(stateSchema.kind, 'array')
-  const state = stateSchema.item
-  assert.equal(state.kind, 'object')
-  assert.equal(state.isStrict, true)
-  assert.deepEqual(Object.keys(state.shape).sort(), [
-    'accepted_events', 'batch_id', 'concurrency', 'parent_call_id', 'parent_session_id',
+test('projection schema describes the strict public view rather than reducer checkpoints', () => {
+  const schema = imageBatchProjectionDefinition(z, SESSION).schema
+  assert.equal(schema.kind, 'array')
+  const row = schema.item
+  assert.equal(row.kind, 'object')
+  assert.equal(row.isStrict, true)
+  assert.deepEqual(Object.keys(row.shape).sort(), [
+    'batch_id', 'concurrency', 'failures', 'image_evidence', 'parent_call_id', 'parent_session_id',
     'schema_version', 'status', 'tasks', 'terminal_event_id',
   ])
-  assert.deepEqual([state.shape.concurrency.minimum, state.shape.concurrency.maximum], [1, 4])
-  assert.deepEqual(state.shape.status.values, ['completed', 'partial', 'failed', 'cancelled'])
-  assert.equal(state.shape.status.isOptional, true)
-  assert.equal(state.shape.terminal_event_id.isOptional, true)
+  assert.equal(row.shape.accepted_events, undefined)
+  assert.deepEqual(row.shape.status.values, ['completed', 'partial', 'failed', 'cancelled'])
+  assert.equal(row.shape.status.isOptional, true)
+  assert.equal(row.shape.terminal_event_id.isOptional, true)
+  assert.equal(row.refinement.check({}), true)
+  assert.equal(row.refinement.check({ status: 'failed' }), false)
+  assert.equal(row.refinement.check({ terminal_event_id: 'x' }), false)
+  assert.equal(row.refinement.check({ status: 'failed', terminal_event_id: 'x' }), true)
 
-  const tasks = state.shape.tasks
+  const tasks = row.shape.tasks
   assert.deepEqual([tasks.minimum, tasks.maximum], [2, 8])
-  assert.equal(tasks.item.kind, 'object')
-  assert.equal(tasks.item.isStrict, true)
   assert.deepEqual(Object.keys(tasks.item.shape).sort(), [
     'child_session_id', 'failure_code', 'image_url', 'job_id', 'ordinal', 'prompt_sha256',
     'receipt', 'revision', 'state', 'submission_status', 'task_id', 'updated_at',
   ])
-  assert.deepEqual([tasks.item.shape.ordinal.minimum, tasks.item.shape.ordinal.maximum], [1, 8])
-  assert.deepEqual([tasks.item.shape.revision.minimum, tasks.item.shape.revision.maximum], [1, 2_147_483_647])
-  assert.deepEqual(tasks.item.shape.state.values, ['queued', 'running', 'needs-review', 'completed', 'failed', 'cancelled', 'unknown', 'interrupted'])
-  assert.deepEqual(tasks.item.shape.submission_status.values, ['not-submitted', 'submitted', 'unknown'])
-  assert.equal(tasks.item.shape.image_url.maximum, 16)
-  assert.equal(tasks.item.shape.child_session_id.isOptional, true)
+  const evidence = row.shape.image_evidence
+  assert.equal(evidence.maximum, 8)
+  assert.deepEqual(Object.keys(evidence.item.shape).sort(), ['child_session_id', 'ordinal', 'receipt', 'task_id'])
+  assert.deepEqual(evidence.item.shape.receipt.shape.status.values, ['completed'])
+  assert.equal(evidence.item.shape.receipt.shape.revision.minimum, 2)
+  assert.equal(tasks.item.shape.receipt.shape.revision.minimum, 2)
+  const failures = row.shape.failures
+  assert.equal(failures.maximum, 8)
+  assert.deepEqual(Object.keys(failures.item.shape).sort(), [
+    'child_session_id', 'failure_code', 'job_id', 'ordinal', 'receipt', 'state', 'task_id',
+  ])
+  assert.deepEqual(failures.item.shape.state.values, ['failed', 'cancelled', 'unknown', 'interrupted'])
+})
 
-  const receipt = tasks.item.shape.receipt
-  assert.equal(receipt.kind, 'object')
-  assert.equal(receipt.isStrict, true)
-  assert.equal(receipt.isOptional, true)
-  assert.deepEqual(Object.keys(receipt.shape).sort(), ['call_id', 'event_seq', 'owner_session_id', 'revision', 'status'])
-  assert.deepEqual([receipt.shape.revision.minimum, receipt.shape.revision.maximum], [1, 3])
-  assert.deepEqual([receipt.shape.event_seq.minimum, receipt.shape.event_seq.maximum], [0, Number.MAX_SAFE_INTEGER])
-  assert.deepEqual(receipt.shape.status.values, ['completed', 'needs-review', 'failed', 'cancelled', 'unknown'])
+test('projection schema parses public init, created, running, and terminal views', () => {
+  const projection = imageBatchProjectionDefinition(z, SESSION)
+  let state = projection.init()
+  assert.deepEqual(projection.schema.parse(projection.view(state)), [])
+  state = projection.apply(state, { type: 'emate/image-batch', data: created() })
+  projection.schema.parse(projection.view(state))
+  const firstLink = linked(projection.view(state)[0].tasks[0])
+  state = projection.apply(state, { type: 'emate/image-batch', data: eventFor(2, 'task-linked', firstLink) })
+  state = projection.apply(state, { type: 'emate/image-batch', data: eventFor(3, 'task-state', running(firstLink)) })
+  projection.schema.parse(projection.view(state))
+  state = projection.apply(state, { type: 'emate/image-batch', data: eventFor(4, 'task-state', completed(state[0].tasks[0])) })
+  state = projection.apply(state, { type: 'emate/image-batch', data: eventFor(5, 'task-state', interrupted(state[0].tasks[1])) })
+  state = projection.apply(state, { type: 'emate/image-batch', data: terminal(6, 'partial', state[0].tasks) })
+  const view = projection.view(state)
+  assert.equal(projection.schema.parse(view), view)
 
-  const accepted = state.shape.accepted_events
-  assert.equal(accepted.minimum, 1)
-  assert.equal(accepted.maximum, 34)
-  assert.equal(accepted.item.kind, 'object')
-  assert.equal(accepted.item.isStrict, true)
-  assert.deepEqual(Object.keys(accepted.item.shape).sort(), ['canonical', 'event_id'])
-  assert.deepEqual([accepted.item.shape.canonical.minimum, accepted.item.shape.canonical.maximum], [1, 65_536])
+  for (const mutate of [
+    row => { row.accepted_events = [] },
+    row => { delete row.image_evidence },
+    row => { delete row.failures },
+    row => { row.image_evidence[0].receipt.status = 'failed' },
+    row => { row.failures[0].extra = true },
+    row => { delete row.terminal_event_id },
+  ]) {
+    const bad = structuredClone(view); mutate(bad[0])
+    assert.throws(() => projection.schema.parse(bad))
+  }
 })
 
 test('reducer cannot create checkpoint rows beyond schema bounds', () => {

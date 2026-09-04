@@ -7,6 +7,7 @@ import { loadTargetLlm, loadTargetStorageDomain, loadTargetTools } from './targe
 import { imageBatchParameters, imageBatchResultSchema } from './image-batch.ts'
 import { imageBatchProjectionDefinition } from './image-batch-events.ts'
 import { createNativeImageTaskRuntime } from './native-image-task-runner.ts'
+import { installImageBatchRecovery, readDurableImageBatchResult } from './image-batch-recovery.ts'
 
 export const name = 'emate-image-generation'
 export const inject = [
@@ -1408,8 +1409,10 @@ export async function apply(ctx, config = {}) {
     sourceReviewAvailable: parent => ctx.get('userQuestions') !== undefined
       && ctx.agents.get(parent.id) === parent && ctx.agents.roots().includes(parent),
     resolveSources: (parent, attachmentIds, signal) => resolveBatchSources(ctx, parent, attachmentIds, signal),
+    readDurableResult: (parent, batchId, signal) => readDurableImageBatchResult(ctx, parent, batchId, signal),
   })
   await hydrateImageReceiptProjections(ctx)
+  await installImageBatchRecovery(ctx)
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision

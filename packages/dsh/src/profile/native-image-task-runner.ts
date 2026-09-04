@@ -61,7 +61,7 @@ interface TerminalReceipt {
   readonly output?: ImageAttachmentRef
   readonly failure_code?: string
 }
-interface ProvenImage { readonly pointer: ImageBatchReceiptPointer; readonly attachment: ImageAttachmentRef; readonly jobId: string }
+interface ProvenImage { readonly pointer: ImageBatchReceiptPointer; readonly jobId: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -197,6 +197,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
   deadlineMs?: number
   sourceReviewAvailable?(parent: AgentLike): boolean
   resolveSources?(parent: AgentLike, attachmentIds: readonly string[], signal: AbortSignal): Promise<readonly ImageAttachmentRef[]>
+  readDurableResult?(parent: AgentLike, batchId: string, signal: AbortSignal): Promise<unknown>
 } = {}) {
   const deadlineMs = options.deadlineMs ?? 610_000
   const lookup = new Map<string, Gate>()
@@ -296,7 +297,6 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
 
     let state: ImageBatchReducerState | undefined
     let fatal: unknown
-    const images = new Map<number, ImageAttachmentRef>()
     const failFatal = (reason: unknown) => {
       if (fatal !== undefined) return
       fatal = reason
@@ -398,8 +398,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
           const completed = completedCandidates[0]
           const job = ctx.jobs.get(completed.receipt.job_id!, run.localAgent)
           if (job.kind === 'emate-image' && job.ownerSession === gate.claimedChildId && job.status === 'completed') {
-            proven = { pointer: completed.pointer, attachment: completed.receipt.output!, jobId: completed.receipt.job_id! }
-            images.set(task.ordinal, proven.attachment)
+            proven = { pointer: completed.pointer, jobId: completed.receipt.job_id! }
           }
         }
         if (calls.length !== 1 || finalEvents.length !== 1 || authorizedCallId === undefined
@@ -481,20 +480,14 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
     }
     for (const task of request.tasks) await stopQueued(task, exec.signal.aborted ? 'cancelled' : 'not-submitted')
     const tasks = state!.tasks
-    const imageCount = tasks.filter(task => images.has(task.ordinal)).length
+    const imageCount = tasks.filter(task => task.receipt?.status === 'completed').length
     const failureCount = tasks.filter(task => task.state !== 'completed').length
     const status = tasks.every(task => task.state === 'completed') && imageCount === tasks.length ? 'completed'
       : imageCount > 0 && failureCount > 0 ? 'partial'
         : imageCount === 0 && tasks.every(task => task.state === 'cancelled' || task.state === 'interrupted') ? 'cancelled' : 'failed'
     await append({ ...base(), kind: 'terminal', status, tasks }, 'image batch terminal')
-    const durable = state!
-    return { schema_version: 1, batch_id: durable.batch_id, status: durable.status!, tasks: durable.tasks,
-      images: durable.tasks.filter(task => images.has(task.ordinal)).map(task => ({ task_id: task.task_id, ordinal: task.ordinal,
-        child_session_id: task.child_session_id!, receipt: task.receipt!, attachment: images.get(task.ordinal)! })),
-      failures: durable.tasks.filter(task => task.state !== 'completed').map(task => ({ task_id: task.task_id, ordinal: task.ordinal,
-        state: task.state, failure_code: task.failure_code!, ...(task.child_session_id === undefined ? {} : { child_session_id: task.child_session_id }),
-        ...(task.job_id === undefined ? {} : { job_id: task.job_id }), ...(task.receipt === undefined ? {} : { receipt: task.receipt }) })),
-      terminal_event_id: durable.terminal_event_id! }
+    if (options.readDurableResult === undefined) throw new Error('durable image batch result reader is unavailable')
+    return await options.readDurableResult(parent, state!.batch_id, exec.signal)
   }
   return { claim, execute }
 }

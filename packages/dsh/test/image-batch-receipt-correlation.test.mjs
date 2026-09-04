@@ -7,7 +7,7 @@ import { imageBatchProjectionDefinition } from '../src/profile/image-batch-event
 const SESSION = 'parent-session'
 const TIME = '2026-02-17T12:34:56.000Z'
 const PROMPT = 'a'.repeat(64)
-const node = (kind, fields = {}) => ({ kind, ...fields, strict() { return this }, optional() { return this }, int() { return this }, min() { return this }, max() { return this }, regex() { return this } })
+const node = (kind, fields = {}) => ({ kind, ...fields, strict() { return this }, optional() { return this }, int() { return this }, min() { return this }, max() { return this }, regex() { return this }, refine() { return this } })
 const z = { array: item => node('array', { item }), enum: values => node('enum', { values }), literal: value => node('literal', { value }), number: () => node('number'), object: shape => node('object', { shape }), string: () => node('string') }
 const base = (call, eventOrdinal) => ({ schema_version: 1, event_id: imageBatchEventId(SESSION, call, eventOrdinal),
   batch_id: imageBatchId(SESSION, call), parent_session_id: SESSION, parent_call_id: call, occurred_at: TIME })

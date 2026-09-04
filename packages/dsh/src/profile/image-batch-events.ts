@@ -77,6 +77,7 @@ interface ImageBatchProjectionSchema {
   min(value: number): ImageBatchProjectionSchema
   optional(): ImageBatchProjectionSchema
   regex(pattern: RegExp): ImageBatchProjectionSchema
+  refine(check: (value: any) => boolean, message?: string): ImageBatchProjectionSchema
   strict(): ImageBatchProjectionSchema
 }
 interface ImageBatchProjectionSchemaFactory {
@@ -149,7 +150,7 @@ function receipt(value: unknown): ImageBatchReceiptPointer {
   return {
     owner_session_id: nativeId(value.owner_session_id, 'receipt owner_session_id'),
     call_id: nativeId(value.call_id, 'receipt call_id'),
-    revision: integer(value.revision, 1, 3, 'receipt revision'),
+    revision: integer(value.revision, 2, 3, 'receipt revision'),
     event_seq: integer(value.event_seq, 0, Number.MAX_SAFE_INTEGER, 'receipt event_seq'),
     status,
   } as ImageBatchReceiptPointer
@@ -363,7 +364,7 @@ export function imageBatchProjectionDefinition(z: ImageBatchProjectionSchemaFact
   const receiptSchema = z.object({
     owner_session_id: nativeIdSchema(),
     call_id: nativeIdSchema(),
-    revision: z.number().int().min(1).max(3),
+    revision: z.number().int().min(2).max(3),
     event_seq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     status: z.enum(['completed', 'needs-review', 'failed', 'cancelled', 'unknown']),
   }).strict()
@@ -381,21 +382,42 @@ export function imageBatchProjectionDefinition(z: ImageBatchProjectionSchemaFact
     failure_code: z.string().min(1).max(128).regex(FAILURE_CODE).optional(),
     updated_at: z.string().min(20).max(35).regex(TIMESTAMP).optional(),
   }).strict()
-  const acceptedEventSchema = z.object({
-    event_id: z.string().regex(DERIVED_ID),
-    canonical: z.string().min(1).max(MAX_CANONICAL_EVENT_CHARS),
+  const completedReceiptSchema = z.object({
+    owner_session_id: nativeIdSchema(),
+    call_id: nativeIdSchema(),
+    revision: z.number().int().min(2).max(3),
+    event_seq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    status: z.enum(['completed']),
   }).strict()
-  const stateSchema = z.array(z.object({
+  const evidenceSchema = z.object({
+    task_id: z.string().regex(DERIVED_ID),
+    ordinal: z.number().int().min(1).max(8),
+    child_session_id: nativeIdSchema(),
+    receipt: completedReceiptSchema,
+  }).strict()
+  const failureSchema = z.object({
+    task_id: z.string().regex(DERIVED_ID),
+    ordinal: z.number().int().min(1).max(8),
+    state: z.enum(['failed', 'cancelled', 'unknown', 'interrupted']),
+    failure_code: z.string().min(1).max(128).regex(FAILURE_CODE),
+    child_session_id: nativeIdSchema().optional(),
+    job_id: nativeIdSchema().optional(),
+    receipt: receiptSchema.optional(),
+  }).strict()
+  const publicRowSchema = z.object({
     schema_version: z.literal(1),
     batch_id: z.string().regex(DERIVED_ID),
     parent_session_id: nativeIdSchema(),
     parent_call_id: nativeIdSchema(),
     concurrency: z.number().int().min(1).max(4),
     tasks: z.array(taskSchema).min(2).max(8),
+    image_evidence: z.array(evidenceSchema).max(8),
+    failures: z.array(failureSchema).max(8),
     status: z.enum(['completed', 'partial', 'failed', 'cancelled']).optional(),
     terminal_event_id: z.string().regex(DERIVED_ID).optional(),
-    accepted_events: z.array(acceptedEventSchema).min(1).max(MAX_ACCEPTED_EVENTS),
-  }).strict())
+  }).strict().refine(value => (value.status === undefined) === (value.terminal_event_id === undefined),
+    'status and terminal_event_id must be present together')
+  const stateSchema = z.array(publicRowSchema)
   return {
     key: PROJECTION_KEY,
     schema: stateSchema,

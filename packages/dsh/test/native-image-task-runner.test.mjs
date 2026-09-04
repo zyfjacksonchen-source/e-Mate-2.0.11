@@ -10,7 +10,7 @@ function session(id, meta = {}) {
   return { header: { id, ...meta }, events, append(type, data, options) { events.push({ seq: events.length, time: Date.now(), type, data, options }) } }
 }
 
-function harness({ flush = async () => true, mutateRun, outcome = 'completed', callCount = 1, parentSessionId = 'parent', onStart, onDispose, descriptorTransform, claimArgs, deadlineMs = 2_000, sourceRefs, sourceReviewAvailable = sourceRefs !== undefined, receiptMutate, extraReceipt } = {}) {
+function harness({ flush = async () => true, mutateRun, outcome = 'completed', callCount = 1, parentSessionId = 'parent', onStart, onDispose, descriptorTransform, claimArgs, deadlineMs = 2_000, sourceRefs, sourceReviewAvailable = sourceRefs !== undefined, receiptMutate, extraReceipt, durableResultMutate } = {}) {
   const disposers = []
   const parentSession = session(parentSessionId)
   const parent = { id: parentSessionId, session: parentSession }
@@ -18,6 +18,7 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
   let live = 0
   let maximum = 0
   let providers = 0
+  let durableReads = 0
   let childOrdinal = 0
   const scopes = []
   const starts = []
@@ -129,12 +130,30 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
       },
     },
   }
+  const readDurableResult = async (_parent, batchId) => {
+    durableReads += 1
+    const terminal = parentSession.events.findLast(event => event.type === 'emate/image-batch' && event.data.kind === 'terminal' && event.data.batch_id === batchId).data
+    const images = terminal.tasks.filter(task => task.receipt?.status === 'completed').map(task => {
+      const child = childSessions.find(value => value.header.id === task.child_session_id)
+      const receipt = child.events.find(event => event.seq === task.receipt.event_seq).data
+      return { task_id: task.task_id, ordinal: task.ordinal, child_session_id: task.child_session_id,
+        receipt: task.receipt, attachment: receipt.output }
+    })
+    const failures = terminal.tasks.filter(task => task.state !== 'completed').map(task => ({ task_id: task.task_id,
+      ordinal: task.ordinal, state: task.state, failure_code: task.failure_code,
+      ...(task.child_session_id === undefined ? {} : { child_session_id: task.child_session_id }),
+      ...(task.job_id === undefined ? {} : { job_id: task.job_id }), ...(task.receipt === undefined ? {} : { receipt: task.receipt }) }))
+    const value = { schema_version: 1, batch_id: batchId, status: terminal.status, tasks: terminal.tasks,
+      images, failures, terminal_event_id: terminal.event_id }
+    return durableResultMutate === undefined ? value : durableResultMutate(value)
+  }
   runtime = createNativeImageTaskRuntime(ctx, { deadlineMs, sourceReviewAvailable: () => sourceReviewAvailable,
     resolveSources: sourceRefs === undefined ? undefined : async (_parent, ids) => { sourceResolutions.push([...ids]); return ids.map(id => sourceRefs.get(id)) },
+    readDurableResult,
   })
   const claim = runtime.claim
   runtime.claim = (agent, args) => { claimsBeforeReturn.push(!returnedStarts.has(Number(agent.id.slice('child-'.length)))); return claim(agent, args) }
-  return { ctx, runtime, parent, parentSession, stats: () => ({ live, maximum, providers, scopes, starts, disposedOrder, aborted, claimsBeforeReturn, childPrompts, childSessions, sourceResolutions }), dispose: async () => Promise.all(disposers.map(fn => fn())) }
+  return { ctx, runtime, parent, parentSession, stats: () => ({ live, maximum, providers, durableReads, scopes, starts, disposedOrder, aborted, claimsBeforeReturn, childPrompts, childSessions, sourceResolutions }), dispose: async () => Promise.all(disposers.map(fn => fn())) }
 }
 
 for (const count of [2, 4, 5, 8]) test('runs ' + count + ' tasks with the requested worker bound', async () => {
@@ -154,6 +173,16 @@ for (const count of [2, 4, 5, 8]) test('runs ' + count + ' tasks with the reques
   assert.equal(parentLog.includes('attachmentId'), false)
   assert.equal(parentLog.includes('mediaType'), false)
   await h.dispose()
+})
+
+test('final Tool value comes from durable reader only after terminal flush', async () => {
+  const h = harness({ durableResultMutate: value => ({ ...value, status: 'failed', images: [] }) })
+  const result = await h.runtime.execute({ tasks: [{ prompt: 'a' }, { prompt: 'b' }] },
+    { agent: h.parent, callId: 'durable-result', signal: new AbortController().signal })
+  assert.equal(result.status, 'failed')
+  assert.deepEqual(result.images, [])
+  assert.equal(h.stats().durableReads, 1)
+  assert.equal(h.parentSession.events.at(-1).data.kind, 'terminal')
 })
 
 test('ordinary direct Agent claim returns without reading long session events', async () => {
@@ -327,6 +356,7 @@ test('created, link, child, task, and terminal flush false or rejection fail clo
       assert.equal(tripped, true)
       if (phase === 'created') assert.equal(h.stats().starts.length, 0)
       if (phase === 'link') assert.equal(h.stats().providers, 0)
+      if (phase === 'terminal') assert.equal(h.stats().durableReads, 0)
       assert.equal(h.stats().live, 0)
     })
   }

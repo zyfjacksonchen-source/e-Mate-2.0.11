@@ -24,6 +24,7 @@ function controlledHarness({ outcome = () => 'completed', failTaskFlush } = {}) 
   }
   const parent = { id: 'parent', session: parentSession }
   const jobs = new Map()
+  const childSessions = []
   const settles = new Map()
   const disposeReleases = new Map()
   const disposeEntered = new Set()
@@ -98,6 +99,7 @@ function controlledHarness({ outcome = () => 'completed', failTaskFlush } = {}) 
           },
           append(type, data, options) { backing.push({ seq: backing.length, type, data, options }) },
         }
+        childSessions.push(childSession)
         const descriptor = { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label }
         childSession.append('subagent/descriptor', descriptor)
         const callId = 'call-' + ordinal
@@ -161,7 +163,20 @@ function controlledHarness({ outcome = () => 'completed', failTaskFlush } = {}) 
       },
     },
   }
-  runtime = createNativeImageTaskRuntime(ctx, { deadlineMs: 60_000 })
+  runtime = createNativeImageTaskRuntime(ctx, { deadlineMs: 60_000,
+    readDurableResult: async (_parent, batchId) => {
+      const terminal = parentEvents.findLast(event => event.data?.kind === 'terminal' && event.data.batch_id === batchId).data
+      const images = terminal.tasks.filter(task => task.receipt?.status === 'completed').map(task => {
+        const child = childSessions.find(value => value.header.id === task.child_session_id)
+        const receipt = child.events.find(event => event.seq === task.receipt.event_seq).data
+        return { task_id: task.task_id, ordinal: task.ordinal, child_session_id: task.child_session_id, receipt: task.receipt, attachment: receipt.output }
+      })
+      const failures = terminal.tasks.filter(task => task.state !== 'completed').map(task => ({ task_id: task.task_id, ordinal: task.ordinal,
+        state: task.state, failure_code: task.failure_code, ...(task.child_session_id === undefined ? {} : { child_session_id: task.child_session_id }),
+        ...(task.job_id === undefined ? {} : { job_id: task.job_id }), ...(task.receipt === undefined ? {} : { receipt: task.receipt }) }))
+      return { schema_version: 1, batch_id: batchId, status: terminal.status, tasks: terminal.tasks, images, failures, terminal_event_id: terminal.event_id }
+    },
+  })
   return {
     runtime, parent, parentSession, log, starts, aborted,
     stats: () => ({ live, maximum }),

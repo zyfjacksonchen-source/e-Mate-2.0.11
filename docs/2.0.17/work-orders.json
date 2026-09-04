@@ -445,15 +445,24 @@
       "branch": "feat/2.0.17/em217-107-recovery-compatibility",
       "worktree": "/Users/mac/e-mate/worktrees/em217-107",
       "write_set": [
-        "packages/dsh/src/profile/image-batch.ts",
         "packages/dsh/src/profile/image-batch-recovery.ts",
-        "packages/dsh/test/**recovery*"
+        "packages/dsh/src/profile/image-batch-events.ts",
+        "packages/dsh/src/profile/native-image-task-runner.ts",
+        "packages/dsh/src/profile/image-generation.ts",
+        "packages/dsh/test/*recovery*",
+        "packages/dsh/test/image-batch-events.test.mjs",
+        "packages/dsh/test/image-batch-receipt-correlation.test.mjs",
+        "packages/dsh/test/native-image-task-runner.test.mjs",
+        "packages/dsh/test/image-batch-worker-stress.test.mjs",
+        "docs/2.0.17/work-orders.json",
+        "docs/2.0.17/check-plan.mjs"
       ],
       "implementation": [
-        "工具最终结果由 durable projection 生成，不从内存数组拼接。",
+        "工具最终结果由 durable projection 生成，不从内存数组拼接；SessionProjection schema 必须精确校验 publicBatch view（image_evidence/failures），不得使用含 accepted_events 的 reducer checkpoint schema。",
         "重启后从 parent events、child Session receipts 和 native Jobs 恢复；created/unlinked 一律标 interrupted/not-submitted，linked/nonterminal 一律标 unknown，绝不自动恢复、重试或重新启动 one-shot task。",
         "已有 linked child terminal 可通过 native Session/Job 重新取得并投影/完成 parent，且 provider POST=0；unknown 仅在读取到已存在 proven receipt 时收敛，否则保持 unknown，直到显式新 Tool call。",
-        "旧会话继续使用现有 Gallery 只读关联逻辑，新批次不再走 legacy label/time fallback。"
+        "旧会话继续使用现有 Gallery 只读关联逻辑，新批次不再走 legacy label/time fallback。",
+        "恢复分类前 parent Session 必须 flush true 并 refold；仅 exact native session not-found 可保守转 unknown，cache/storage outage 或 malformed projection fail closed。child promotion 要求 exact normalized call args、operation/sources、revision-2/3 history、lineage 与 Job；任何 foreign/corrupt evidence 都不得写 receipt pointer/image。running/needs-review-only projection 保守 unknown；billing recorded/not-submitted/unknown 精确映射 submission truth。durable result 要求 evidence/failures 集合完整、ordinal 1..N、pointer optional fields 与 derived batch status 全部匹配；parent receipt revision 仅 2..3。"
       ],
       "acceptance": [
         "在 created/unlinked、linked/nonterminal、provider-finished/attachment-before-parent-event 三个切点模拟崩溃：分别得到 interrupted/not-submitted、unknown、或从 existing child terminal receipt 无 POST 地完成；绝无自动重启/重试。",
