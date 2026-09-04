@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { act, cleanup, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ProjectionValueStore } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/projection-store.ts'
 import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import { createImageBatchProjectionSelector, useImageBatchProjection } from '../src/client/image-batch-client.ts'
+import { selectArtifactTerminal } from '../src/client/image-gallery.tsx'
 
 afterEach(cleanup)
 
@@ -145,9 +144,18 @@ describe('image batch native projection client', () => {
     expect(subscriptions).toBe(0)
   })
 
-  it('leaves legacy Gallery and closed-turn selection byte-for-behavior', () => {
-    const source = readFileSync(resolve('src/client/image-gallery.tsx'), 'utf8')
-    expect(source).not.toMatch(/image-batch-client|eMateImageBatches/u)
-    expect(source).toMatch(/if \(owner\.turn\.status !== 'closed'\) return null/u)
+  it('integrates the reader only for batch tails and preserves legacy imagegen closure', () => {
+    const owner = (status: 'open' | 'closed', data: unknown) => ({
+      turn: { turn: 1, status, start: undefined, end: undefined, steps: [], data: { get: () => data } },
+      nodes: [], seq: 10, openFile: () => {},
+    })
+    const imagegen = { calls: [{ callId: 'single-image', seq: 2 }], foregroundSubagents: [] }
+    expect(selectArtifactTerminal(owner('open', imagegen) as never)).toBeNull()
+    expect(selectArtifactTerminal(owner('closed', imagegen) as never)).toEqual({
+      callIds: ['single-image'], paths: [], childSessionIds: [],
+    })
+    expect(selectArtifactTerminal(owner('open', {
+      calls: [], foregroundSubagents: [], batchCalls: [{ callId: 'batch-call', seq: 3 }],
+    }) as never)).toEqual({ callIds: [], batchCallIds: ['batch-call'], paths: [], childSessionIds: [] })
   })
 })

@@ -799,8 +799,10 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-302",
       "write_set": [
         "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.tsx",
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.module.css",
         "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
-        "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx"
+        "packages/dsh/profile/plugins/emate-shell/tests/image-batch-progress.client.spec.tsx",
+        "docs/2.0.17/work-orders.json"
       ],
       "implementation": [
         "image_batch 创建后立即显示 N 个固定顺序 skeleton 卡片。",
@@ -814,10 +816,10 @@
         "关闭 turn 前已完成图片可见且不会在 turn 关闭时闪烁/重复。"
       ],
       "tests": [
-        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/image-batch-client.client.spec.tsx tests/image-batch-progress.client.spec.tsx tests/image-gallery.client.spec.tsx (from packages/dsh/profile/plugins/emate-shell)",
         "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
       ],
-      "rollback": "回滚组件接入即可；批次仍会完成并保留数据。",
+      "rollback": "删除 live progress 组件及其 turn-tail 接入；parent projection 与 legacy Gallery 保留。",
       "risk": "高"
     },
     {
