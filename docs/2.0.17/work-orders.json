@@ -526,6 +526,46 @@
       }
     },
     {
+      "id": "EM217-109",
+      "wave": "W1 图像运行时",
+      "title": "删除图像生成与编辑确认流程",
+      "owner": "IMG",
+      "depends_on": [
+        "EM217-105",
+        "EM217-107"
+      ],
+      "branch": "feat/2.0.17/em217-109-no-image-confirmation",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-109",
+      "write_set": [
+        "packages/dsh/src/profile/image-generation.ts",
+        "packages/dsh/src/profile/native-image-task-runner.ts",
+        "packages/dsh/test/native-image-task-runner.test.mjs",
+        "packages/dsh/test/image-batch-receipt-correlation.test.mjs",
+        "packages/dsh/test/e-mate.test.mjs",
+        "docs/2.0.17/work-orders.json",
+        "docs/2.0.17/check-plan.mjs"
+      ],
+      "implementation": [
+        "删除新 producer 的 userQuestions lookup/ask 与 revision-2 needs-review/revision-3 adjudication；不得 auto-approve 或隐藏 live question。",
+        "generate/edit/fusion 在 response/base64/raster/CAS/metadata 与 source-output-different 校验通过后直接写 completed revision 2；semantic 为 not-applicable 且无 human_review。",
+        "保留 explicit source IDs、parent CAS、child ContentBlocks、nonce gate、Job/provider/CAS、same-source failure、model policy、EM217-202 retry 与 durable parent result。",
+        "删除 sourceReviewAvailable/reviewOwner/reportReviewFailure 等死状态；历史 revision-2 needs-review/revision-3 accepted/rejected 继续只读解析与恢复，不重写旧日志。"
+      ],
+      "acceptance": [
+        "direct generate/edit/fusion 与 source batch edit/fusion 对 userQuestions 调用恒为 0，服务缺失或抛错均不影响结构有效结果。",
+        "新 edit/fusion 只产生 completed revision 2，semantic not-applicable，无 needs-review、revision 3 或 human_review。",
+        "same-source、invalid response、CAS 与 flush 失败继续失败；provider/Job 次数与有界 worker 不变。",
+        "历史 reviewed receipts 仍可由 reducer/recovery 读取，不改变 child receipt schema 或 UI 历史状态。"
+      ],
+      "tests": [
+        "node --test packages/dsh/test/*image*.test.mjs",
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "恢复旧确认 producer；保留既有 revision-2 completed receipts 与 CAS 图片。",
+      "risk": "高"
+    },
+    {
       "id": "EM217-201",
       "wave": "W2 模型网关",
       "title": "证明并按缺口加固现有网关幂等账本",
@@ -1291,6 +1331,7 @@
       "depends_on": [
         "EM217-107",
         "EM217-108",
+        "EM217-109",
         "EM217-205",
         "EM217-206",
         "EM217-304",
@@ -1313,8 +1354,8 @@
         "tests/contracts/**"
       ],
       "implementation": [
-        "覆盖 2/4/5/8 图、created effective concurrency、strict task-linked/task-state、pointer-only receipt、camelCase ImageAttachmentRef、乱序、exact duplicate 幂等、conflicting duplicate 拒绝、同名 prompt、取消、image-bearing failed task/partial、needs-review、unknown、HMR、timeout 与重启。",
-        "覆盖 source-task 完整路由：parent CAS/Attachment refs、explicit IDs gate、parent userQuestions 不可用时 provider 前拒绝、child revision 2 提问前 flush、revision 3 回答后 flush、adjudication 全程占槽且无永久 needs-review。",
+        "覆盖 2/4/5/8 图、created effective concurrency、strict task-linked/task-state、pointer-only receipt、camelCase ImageAttachmentRef、乱序、exact duplicate 幂等、conflicting duplicate 拒绝、同名 prompt、取消、image-bearing failed task/partial、unknown、HMR、timeout 与重启；历史 needs-review 仅只读兼容。",
+        "覆盖 source-task 完整路由：parent CAS/Attachment refs、explicit IDs gate、zero userQuestions、新 producer completed revision 2 + semantic not-applicable + no human_review、same-source safety，以及历史 revision 2 needs-review/revision 3 accepted/rejected 只读兼容。",
         "覆盖恢复规则：created/unlinked=interrupted/not-submitted，linked/nonterminal=unknown，existing child terminal 可无 provider POST 地 reacquire/project/finalize；任何 one-shot task 都不得自动 resume/retry。",
         "生成随机合法/非法状态序列验证终态唯一、无丢图、无跨批串图。",
         "保留并更新现有 legacy Gallery 与 uncertain provider failure 测试。",
@@ -1322,7 +1363,7 @@
       ],
       "acceptance": [
         "关键 invariant 在 10,000 组随机序列上通过。",
-        "所有原有 imagegen/image edit/image_pack 测试无回退。",
+        "imagegen/image edit/fusion/image_batch/image_pack 测试证明 zero userQuestions、结构/CAS/same-source 安全无回退，且历史 reviewed receipts 仍可读。",
         "EM217-108 direct single-image bypass、local p95/p99 bounds、history slope、sanitized fail-closed evidence 与独立 macOS dev first-visible handoff 均在 dependency closure 中通过；性能 evidence 未通过时保持 OPEN。",
         "EM217-206 is in the dependency closure and its warm/cold management outage, exact expiry, revocation/user/model-list, route toggle/key rotation, stale response, atomic persistence failure, Postgres recovery, Gateway startup OPEN truth, bounded reconnect, zero-provider-POST, local-owner independence, and no-plaintext-secret acceptance remain fail closed until their named evidence passes.",
         "All source/UI/gateway/enterprise-auth/Desktop/Windows-plugin work is in the dependency closure and complete source checks pass before EM217-407; EM217-206 production/installed evidence remains OPEN."

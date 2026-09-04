@@ -45,9 +45,9 @@ assert(!/(?:main|master|latest|HEAD)/.test(JSON.stringify([active, orders.baseli
 
 const tickets = orders.tickets
 const ids = tickets.map(ticket => ticket.id)
-const expectedIds = ['EM217-000', 'EM217-001', 'EM217-002', 'EM217-003', 'EM217-004', 'EM217-101', 'EM217-102', 'EM217-103', 'EM217-104', 'EM217-105', 'EM217-106', 'EM217-107', 'EM217-108', 'EM217-201', 'EM217-202', 'EM217-203', 'EM217-204', 'EM217-205', 'EM217-206', 'EM217-301', 'EM217-302', 'EM217-303', 'EM217-304', 'EM217-305', 'EM217-306', 'EM217-307', 'EM217-401', 'EM217-402', 'EM217-403', 'EM217-404', 'EM217-405', 'EM217-406', 'EM217-407', 'EM217-408', 'EM217-501', 'EM217-502', 'EM217-503', 'EM217-504', 'EM217-505', 'EM217-506', 'EM217-507']
-assert.equal(tickets.length, 41)
-assert.equal(new Set(ids).size, 41)
+const expectedIds = ['EM217-000', 'EM217-001', 'EM217-002', 'EM217-003', 'EM217-004', 'EM217-101', 'EM217-102', 'EM217-103', 'EM217-104', 'EM217-105', 'EM217-106', 'EM217-107', 'EM217-108', 'EM217-109', 'EM217-201', 'EM217-202', 'EM217-203', 'EM217-204', 'EM217-205', 'EM217-206', 'EM217-301', 'EM217-302', 'EM217-303', 'EM217-304', 'EM217-305', 'EM217-306', 'EM217-307', 'EM217-401', 'EM217-402', 'EM217-403', 'EM217-404', 'EM217-405', 'EM217-406', 'EM217-407', 'EM217-408', 'EM217-501', 'EM217-502', 'EM217-503', 'EM217-504', 'EM217-505', 'EM217-506', 'EM217-507']
+assert.equal(tickets.length, 42)
+assert.equal(new Set(ids).size, 42)
 assert.deepEqual([...ids].sort(), [...expectedIds].sort())
 const map = new Map(tickets.map(ticket => [ticket.id, ticket]))
 for (const ticket of tickets) {
@@ -289,6 +289,24 @@ assert.deepEqual(t('EM217-107').write_set, [
   'docs/2.0.17/work-orders.json',
   'docs/2.0.17/check-plan.mjs',
 ])
+const noReview109 = t('EM217-109')
+assert.equal(noReview109.owner, 'IMG')
+assert.deepEqual(noReview109.depends_on, ['EM217-105', 'EM217-107'])
+assert.equal(noReview109.branch, 'feat/2.0.17/em217-109-no-image-confirmation')
+assert.equal(noReview109.worktree, '/Users/mac/e-mate/worktrees/em217-109')
+assert.deepEqual(noReview109.write_set, [
+  'packages/dsh/src/profile/image-generation.ts',
+  'packages/dsh/src/profile/native-image-task-runner.ts',
+  'packages/dsh/test/native-image-task-runner.test.mjs',
+  'packages/dsh/test/image-batch-receipt-correlation.test.mjs',
+  'packages/dsh/test/e-mate.test.mjs',
+  'docs/2.0.17/work-orders.json',
+  'docs/2.0.17/check-plan.mjs',
+])
+for (const required of ['userQuestions lookup/ask', 'completed revision 2', 'semantic not-applicable', 'same-source', '历史 revision-2 needs-review/revision-3']) {
+  assert(text('EM217-109').includes(required), 'EM217-109 missing no-confirmation rule: ' + required)
+}
+
 const latency108 = t('EM217-108')
 assert.equal(latency108.owner, 'IMG')
 assert.equal(latency108.evidence_owner, 'QA')
@@ -334,8 +352,9 @@ assert(regressionText.includes('NEW-IMG-LATENCY-001'))
 assert(ownersText.includes('101 → 102 → 103 → 104 → 105 → 106 → 107 → 108'))
 const qa501 = text('EM217-501')
 assert(t('EM217-501').depends_on.includes('EM217-108'))
+assert(t('EM217-501').depends_on.includes('EM217-109'))
 assert(qa501.includes('EM217-108 direct single-image bypass'))
-for (const required of ['parent userQuestions 不可用时 provider 前拒绝', 'revision 2', 'revision 3', '无永久 needs-review', 'created/unlinked=interrupted/not-submitted', 'linked/nonterminal=unknown', '不得自动 resume/retry']) {
+for (const required of ['zero userQuestions', 'completed revision 2', 'semantic not-applicable', 'no human_review', 'same-source safety', '历史 revision 2 needs-review/revision 3', 'created/unlinked=interrupted/not-submitted', 'linked/nonterminal=unknown', '不得自动 resume/retry']) {
   assert(qa501.includes(required), 'EM217-501 missing adversarial rule: ' + required)
 }
 for (const ticket of tickets) for (const path of ticket.write_set) assert(!path.includes('enterprise/apps/model-gateway/test/**'), ticket.id + ' uses singular gateway test path')
@@ -460,4 +479,4 @@ assert(executionText.includes('workdir: desktop; corepack yarn check'))
 for (const command of ['workdir: desktop; corepack yarn check', 'workdir: desktop; corepack yarn dist:mac', 'workdir: desktop; corepack yarn dist:win']) {
   assert(ordersText.includes(command), 'work orders missing Desktop command: ' + command)
 }
-console.log('EM217 plan check passed: 41 tickets, exact pins, enterprise recovery and single-image latency gates, corrected component commands, acyclic dependencies, WIP <= 6, and gates OPEN.')
+console.log('EM217 plan check passed: 42 tickets, exact pins, enterprise recovery and single-image latency gates, corrected component commands, acyclic dependencies, WIP <= 6, and gates OPEN.')

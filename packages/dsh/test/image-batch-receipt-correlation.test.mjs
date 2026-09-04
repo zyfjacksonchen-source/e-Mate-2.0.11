@@ -75,7 +75,7 @@ test('parent terminal is unique and rejects malformed receipt revision and owner
 
 test('child receipt producer remains child-owned and carries no batch correlation metadata', () => {
   const source = readFileSync(new URL('../src/profile/image-generation.ts', import.meta.url), 'utf8')
-  const verified = source.slice(source.indexOf('function verifiedReceipt('), source.indexOf('async function requireImageFlush'))
+  const verified = source.slice(source.indexOf('function verifiedReceipt('), source.indexOf('function validVerification'))
   const failed = source.slice(source.indexOf('function failedReceipt('), source.indexOf('function runningReceipt('))
   const running = source.slice(source.indexOf('function runningReceipt('), source.indexOf('function appendImageReceipt('))
   for (const producer of [verified, failed, running]) {

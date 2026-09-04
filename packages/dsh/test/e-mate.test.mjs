@@ -1142,17 +1142,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
   assert.equal(imageGenerationSource.match(/ctx\.jobs\.start\(/gu)?.length, 1)
   assert.doesNotMatch(imageGenerationSource, /startWhenAvailable|subagents?\.start|ctx\.on\(['"]subagent\//u)
   assert.doesNotMatch(imageGenerationSource, /IMAGE_LEAF_LABEL|childImageRuns|authorizedLeaves/u)
-  assert.doesNotMatch(imageGenerationSource, /export async function reviewImageCandidate/u)
-  const batchReviewSource = imageGenerationSource.slice(
-    imageGenerationSource.indexOf('async function reviewImageCandidate'),
+  assert.doesNotMatch(imageGenerationSource, /ctx.get(['"]userQuestions['"])|reviewImageCandidate|requireImageFlush|combinedReviewPersistence/u)
+  const verifiedProducer = imageGenerationSource.slice(
+    imageGenerationSource.indexOf('function verifiedReceipt'),
     imageGenerationSource.indexOf('function validVerification'),
   )
-  assert.ok(batchReviewSource.indexOf('appendImageReceipt(owner, candidate)') < batchReviewSource.indexOf("requireImageFlush(ctx, owner, 'image batch review candidate')"))
-  assert.ok(batchReviewSource.indexOf("requireImageFlush(ctx, owner, 'image batch review candidate')") < batchReviewSource.indexOf('catch (primary)'))
-  assert.ok(batchReviewSource.indexOf('catch (primary)') < batchReviewSource.indexOf('appendImageReceipt(owner, cancelled)'))
-  assert.ok(batchReviewSource.indexOf('appendImageReceipt(owner, cancelled)') < batchReviewSource.indexOf("requireImageFlush(ctx, owner, 'image batch review candidate cleanup')"))
-  assert.equal(batchReviewSource.split('value.request_id, 3').length - 1, 3)
-  assert.match(batchReviewSource, /combinedReviewPersistence\(primary, cleanup\)/u)
+  assert.match(verifiedProducer, /revision: 2/u)
+  assert.match(verifiedProducer, /semantic: sameSource ? 'failed' : 'not-applicable'/u)
+  assert.doesNotMatch(verifiedProducer, /human_review|needs-review|reviewDecision|revision: 3/u)
   assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image-2-pro'/gu)?.length, 1)
   assert.equal(imageGenerationSource.match(/await request\(endpoint\(root, path\)/gu)?.length, 1)
   assert.doesNotMatch(imageGenerationSource, /['"]gpt-image-2['"]/u)
@@ -1688,6 +1685,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.doesNotMatch(batchText, /sha256:|child-|emate-image-/u)
     const imagegen = tools.get('imagegen')
     assert.equal(imagegen.isConcurrencySafe({}), false)
+    assert.deepEqual(imagegen.output.schema.properties.status.enum, ['completed'])
     assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
     assert.deepEqual(imagegen.parameters.required, ['prompt'])
     assert.match(imagegen.description, /use image_batch once and do not call imagegen directly/u)
@@ -1977,259 +1975,92 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(resumed.messages.at(-1).content[0].text, /normally the newest image/u)
     sessionMessages.push(modifyAbove)
 
+    let questionCalls = 0
+    imageReviewAsk = async () => { questionCalls += 1; throw new Error('userQuestions must never be invoked') }
     nextResponseBytes = unreviewedBytes
     const implicitEdit = await imagegen.execute({ prompt: 'Retouch the referenced image only.' }, execution())
     assert.equal(implicitEdit.images.length, 1)
-    assert.equal(implicitEdit.status, 'needs-review')
+    assert.equal(implicitEdit.status, 'completed')
+    assert.equal(implicitEdit.receipt.revision, 2)
     assert.equal(implicitEdit.receipt.verification.source_output, 'distinct')
-    assert.equal(implicitEdit.receipt.verification.semantic, 'needs-review')
+    assert.equal(implicitEdit.receipt.verification.semantic, 'not-applicable')
+    assert.deepEqual(implicitEdit.receipt.verifier, { structural: 'attachment-cas-v1', semantic: 'not-required' })
+    assert.equal(implicitEdit.receipt.verification.human_review, undefined)
     assert.deepEqual(await jobs.at(-1).done, {
-      status: 'failed',
-      detail: '1 image needs review',
-      output: JSON.stringify({
-        image_count: 0,
-        failure_count: 1,
-        receipt_status: 'needs-review',
-        request_ids: [implicitEdit.images[0].request_id],
-        attachment_ids: [],
+      status: 'completed', detail: '1 image, 0 failures', output: JSON.stringify({
+        image_count: 1, failure_count: 0, receipt_status: 'completed',
+        request_ids: [implicitEdit.images[0].request_id], attachment_ids: [implicitEdit.images[0].image.attachmentId],
       }),
     })
     assert.deepEqual(requests.at(-1), {
-      path: '/e-mate/model-api/v1/images/edits',
-      body: {
-        model: 'gpt-image-2-pro',
-        prompt: 'Retouch the referenced image only.',
-        imageFields: ['image'],
-        imageBytes: [inputBytes.byteLength],
-      },
+      path: '/e-mate/model-api/v1/images/edits', body: { model: 'gpt-image-2-pro',
+        prompt: 'Retouch the referenced image only.', imageFields: ['image'], imageBytes: [inputBytes.byteLength] },
     })
 
-    sessionMessages.push({
-      id: 'modify-text-on-image', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'text', text: '图上的方林改为圣都。' }],
-    })
+    sessionMessages.push({ id: 'modify-text-on-image', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'text', text: '图上的方林改为圣都。' }] })
     const textEdit = await imagegen.execute({ prompt: '把图片中的方林改成圣都。' }, execution())
-    assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
-    assert.equal(textEdit.status, 'needs-review')
-    const pendingContent = imagegen.output.render({}, textEdit)
-    assert.deepEqual(pendingContent, [{
-      type: 'text',
-      text: 'Image edit saved: 1 image (e-Mate-image.png) awaiting human confirmation.',
-    }])
-    assert.doesNotMatch(JSON.stringify(pendingContent), /sha256:|attachment(?:Id| ID)/iu)
-    assert.equal(JSON.stringify(pendingContent).includes(textEdit.images[0].image.attachmentId), false)
-    assert.deepEqual(textEdit.receipt.verification.text_replacement, {
-      old_text_sha256: createHash('sha256').update('方林').digest('hex'),
-      new_text_sha256: createHash('sha256').update('圣都').digest('hex'),
-      requested_regions: null,
-      status: 'needs-review',
-    })
-    assert.doesNotMatch(JSON.stringify(textEdit.receipt), /方林|圣都/u)
-    assert.deepEqual(imagegen.output.presentationMeta({}, textEdit), {
-      $eMateDeliverables: {
-        schema_version: 2,
-        items: [],
-        review_candidates: [{
-          kind: 'image',
-          operation: 'edit',
-          reason: 'semantic-verifier-unavailable',
-          name: 'e-Mate-image-review.png',
-          mime: 'image/png',
-          size: textEdit.images[0].image.bytes,
-          sha256: textEdit.images[0].image.attachmentId.slice('sha256:'.length),
-          locator: {
-            kind: 'image-attachment',
-            attachment_id: textEdit.images[0].image.attachmentId,
-            media_type: 'image/png',
-            bytes: textEdit.images[0].image.bytes,
-            width: textEdit.images[0].image.width,
-            height: textEdit.images[0].image.height,
-          },
-          sources: [{
-            kind: 'image-attachment',
-            attachment_id: textEdit.receipt.sources[0].attachmentId,
-            media_type: textEdit.receipt.sources[0].mediaType,
-            bytes: textEdit.receipt.sources[0].bytes,
-            width: textEdit.receipt.sources[0].width,
-            height: textEdit.receipt.sources[0].height,
-          }],
-        }],
-      },
-    })
-    assert.doesNotMatch(JSON.stringify(imagegen.output.presentationMeta({}, textEdit)), /方林|圣都|Retouch|private/u)
+    assert.equal(textEdit.status, 'completed')
+    assert.equal(textEdit.receipt.revision, 2)
+    assert.equal(textEdit.receipt.verification.semantic, 'not-applicable')
+    assert.equal(textEdit.receipt.verification.text_replacement, undefined)
+    assert.equal(textEdit.receipt.verification.human_review, undefined)
+    assert.deepEqual(imagegen.output.render({}, textEdit), [{ type: 'text', text: 'Image generation completed: 1 image (e-Mate-image.png).' }])
+    const textMeta = imagegen.output.presentationMeta({}, textEdit)
+    assert.equal(textMeta.$eMateDeliverables.schema_version, 1)
+    assert.equal(textMeta.$eMateDeliverables.items.length, 1)
+    assert.equal('review_candidates' in textMeta.$eMateDeliverables, false)
 
-    sessionMessages.push({
-      id: 'multi-region-text-edit', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'text', text: '把图中 3 处“武汉”全部改为“成都”。' }],
-    })
-    const multiRegionEdit = await imagegen.execute({ prompt: '3处“武汉”全部改为“成都”。' }, execution())
-    assert.equal(multiRegionEdit.status, 'needs-review')
-    assert.deepEqual(multiRegionEdit.receipt.verification.text_replacement, {
-      old_text_sha256: createHash('sha256').update('武汉').digest('hex'),
-      new_text_sha256: createHash('sha256').update('成都').digest('hex'),
-      requested_regions: 3,
-      status: 'needs-review',
-    })
-    assert.doesNotMatch(JSON.stringify(multiRegionEdit.receipt), /武汉|成都/u)
+    const explicitEdit = await imagegen.execute({ prompt: '只把标题中的旧名称改成新名称。', image_url: attachmentId }, execution())
+    assert.equal(explicitEdit.status, 'completed')
+    assert.equal(explicitEdit.receipt.revision, 2)
+    assert.equal(explicitEdit.receipt.verification.semantic, 'not-applicable')
+    assert.equal(explicitEdit.receipt.verification.human_review, undefined)
 
-    const confirmedExecution = execution()
-    let confirmedReview
-    imageReviewAsk = async request => {
-      confirmedReview = request
-      assert.equal(request.agent, agent)
-      assert.equal(request.signal.aborted, false)
-      assert.equal(request.questions.length, 1)
-      const question = request.questions[0]
-      assert.equal(question.intent.kind, 'image-review')
-      assert.equal(question.intent.sources.length, 1)
-      assert.equal(question.intent.sources[0].attachmentId, attachmentId)
-      assert.notEqual(question.intent.output.attachmentId, attachmentId)
-      assert.match(question.detail, /只把标题中的旧名称改成新名称/u)
-      assert.match(question.detail, /源图 1：e-Mate-image\.png（1×1）/u)
-      assert.match(question.detail, /候选结果：e-Mate-image\.png/u)
-      assert.match(question.detail, /系统已确认候选文件与源文件不同/u)
-      assert.doesNotMatch(question.detail, /sha256|attachmentId|哈希|hash/iu)
-      assert.equal(question.detail.includes(attachmentId), false)
-      assert.equal(question.detail.includes(question.intent.output.attachmentId), false)
-      const pending = agent.session.events.findLast(event => event.type === 'emate/image-output'
-        && event.data?.call_id === confirmedExecution.callId)
-      assert.equal(pending.data.revision, 2)
-      assert.equal(pending.data.status, 'needs-review')
-      assert.equal(pending.data.output.attachmentId, question.intent.output.attachmentId)
-      assert.deepEqual(pending.data.content, [{ type: 'image', attachment: question.intent.output }])
-      return { answers: [{ id: question.id, selected: [question.intent.approve] }] }
-    }
-    const requestsBeforeConfirmedReview = requests.length
-    const confirmedEdit = await imagegen.execute({
-      prompt: '只把标题中的旧名称改成新名称。',
-      image_url: attachmentId,
-    }, confirmedExecution)
-    imageReviewAsk = undefined
-    assert.ok(confirmedReview)
-    assert.equal(requests.length, requestsBeforeConfirmedReview + 1)
-    assert.equal(confirmedEdit.status, 'completed')
-    assert.equal(confirmedEdit.receipt.failure_code, undefined)
-    assert.deepEqual(confirmedEdit.receipt.verifier, {
-      structural: 'attachment-cas-v1',
-      semantic: 'native-user-confirmation-v1',
-    })
-    assert.deepEqual(confirmedEdit.receipt.verification.human_review, {
-      decision: 'accepted',
-      requirement_sha256: createHash('sha256').update('只把标题中的旧名称改成新名称。').digest('hex'),
-    })
-    assert.equal(confirmedEdit.receipt.verification.semantic, 'passed')
-    assert.deepEqual(
-      sessionEvents.filter(event => event.data?.call_id === confirmedExecution.callId)
-        .map(event => [event.data.revision, event.data.status]),
-      [[1, 'running'], [2, 'needs-review'], [3, 'completed']],
-    )
-    assert.equal(imagegen.output.presentationMeta({}, confirmedEdit).$eMateDeliverables.items.length, 1)
-    assert.deepEqual(await jobs.at(-1).done, {
-      status: 'completed',
-      detail: '1 image, 0 failures',
-      output: JSON.stringify({
-        image_count: 1,
-        failure_count: 0,
-        receipt_status: 'completed',
-        request_ids: [confirmedEdit.images[0].request_id],
-        attachment_ids: [confirmedEdit.images[0].image.attachmentId],
-      }),
-    })
-
-    const rejectedExecution = execution()
-    let rejectedCandidateId
-    nextResponseBytes = rejectedBytes
-    imageReviewAsk = async request => {
-      const question = request.questions[0]
-      rejectedCandidateId = question.intent.output.attachmentId
-      return { answers: [{ id: question.id, selected: ['拒绝结果'] }] }
-    }
-    const requestsBeforeRejectedReview = requests.length
-    await assert.rejects(
-      imagegen.execute({ prompt: '删除图片右上角标识。', image_url: attachmentId }, rejectedExecution),
-      /rejected by the user/u,
-    )
-    imageReviewAsk = undefined
-    assert.equal(requests.length, requestsBeforeRejectedReview + 1)
-    const rejectedReceipt = terminalReceipt(agent, rejectedExecution.callId)
-    assert.equal(rejectedReceipt.revision, 3)
-    assert.equal(rejectedReceipt.status, 'failed')
-    assert.equal(rejectedReceipt.failure_code, 'user-rejected')
-    assert.equal(rejectedReceipt.output.attachmentId, rejectedCandidateId)
-    assert.deepEqual(rejectedReceipt.content, [])
-    assert.deepEqual(rejectedReceipt.verification.human_review, {
-      decision: 'rejected',
-      requirement_sha256: createHash('sha256').update('删除图片右上角标识。').digest('hex'),
-    })
-    assert.equal(rejectedReceipt.verification.semantic, 'failed')
-    assert.equal((await jobs.at(-1).done).status, 'failed')
-
-    sessionMessages.push({
-      id: 'new-map-image', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'text', text: '生成一张地图上的路线图。' }],
-    })
+    sessionMessages.push({ id: 'new-map-image', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'text', text: '生成一张地图上的路线图。' }] })
     await imagegen.execute({ prompt: '生成一张地图上的路线图。' }, execution())
-    assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/generations')
-
-    const edited = await imagegen.execute({
-      prompt: 'Retouch only the supplied image.',
-      image_url: [attachmentId],
-    }, execution())
+    const edited = await imagegen.execute({ prompt: 'Retouch only the supplied image.', image_url: [attachmentId] }, execution())
+    assert.equal(edited.status, 'completed')
+    assert.equal(edited.receipt.revision, 2)
     assert.equal(edited.images[0].model, 'gpt-image-2-pro')
-    assert.equal(edited.status, 'needs-review')
-    assert.deepEqual(requests.at(-1), {
-      path: '/e-mate/model-api/v1/images/edits',
-      body: {
-        model: 'gpt-image-2-pro',
-        prompt: 'Retouch only the supplied image.',
-        imageFields: ['image'],
-        imageBytes: [inputBytes.byteLength],
-      },
-    })
 
     const storedSecond = await context.attachments.saveImage({
       data: readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.png', import.meta.url)),
-      mediaType: 'image/png',
-      name: 'diagram.png',
+      mediaType: 'image/png', name: 'diagram.png',
     })
     const second = { ...storedSecond, name: join(temporary, 'private', 'diagram.png') }
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Edit both current images independently.' }, {
-        agent: {
-          id: 'multi-image-session',
-          session: {
-            header: { id: 'multi-image-session', cwd: temporary },
-            events: [],
-            append(type, data, options) {
-              this.events.push({ type, data, ...options, seq: this.events.length, time: Date.now() })
-            },
-            deriveMessages: () => [{
-              id: 'multi-image-message', role: 'user', source: { kind: 'user' },
-              content: [
-                { type: 'image', attachment: selected },
-                { type: 'image', attachment: second },
-                { type: 'text', text: '分别修改这两张图。' },
-              ],
-            }],
-          },
-        },
-        callId: 'multi-image-call', signal: new AbortController().signal,
-      }),
-      /multiple source images.*exact attachment ID/iu,
-    )
-    sessionMessages.push({
-      id: 'second-user-upload', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'image', attachment: second }, { type: 'text', text: '这是第二张源图。' }],
-    })
-    const fused = await imagegen.execute({
-      prompt: 'Fuse these two references into one new composition.',
-      image_url: [attachmentId, second.attachmentId],
-    }, execution())
-    assert.equal(fused.status, 'needs-review')
+    await assert.rejects(imagegen.execute({ prompt: 'Edit both current images independently.' }, {
+      agent: { id: 'multi-image-session', session: { header: { id: 'multi-image-session', cwd: temporary }, events: [],
+        append(type, data, options) { this.events.push({ type, data, ...options, seq: this.events.length, time: Date.now() }) },
+        deriveMessages: () => [{ id: 'multi-image-message', role: 'user', source: { kind: 'user' }, content: [
+          { type: 'image', attachment: selected }, { type: 'image', attachment: second },
+          { type: 'text', text: '分别修改这两张图。' },
+        ] }],
+      } }, callId: 'multi-image-call', signal: new AbortController().signal,
+    }), /multiple source images.*exact attachment ID/iu)
+    sessionMessages.push({ id: 'second-user-upload', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'image', attachment: second }, { type: 'text', text: '这是第二张源图。' }] })
+    const fused = await imagegen.execute({ prompt: 'Fuse these two references into one new composition.',
+      image_url: [attachmentId, second.attachmentId] }, execution())
+    assert.equal(fused.status, 'completed')
+    assert.equal(fused.receipt.revision, 2)
     assert.equal(fused.receipt.operation, 'fusion')
+    assert.equal(fused.receipt.verification.semantic, 'not-applicable')
+    assert.equal(fused.receipt.verification.human_review, undefined)
     assert.deepEqual(requests.at(-1).body.imageFields, ['image[]', 'image[]'])
     assert.deepEqual(fused.receipt.sources.map(ref => ref.attachmentId), [attachmentId, second.attachmentId])
     assert.doesNotMatch(JSON.stringify(fused.receipt), /private|e-mate-image-generation-/u)
+    const noQuestionGenerate = await imagegen.execute({ prompt: 'Generate without any confirmation lookup.' }, execution())
+    assert.equal(noQuestionGenerate.status, 'completed')
+    assert.equal(noQuestionGenerate.receipt.revision, 2)
+    assert.equal(noQuestionGenerate.receipt.verification.semantic, 'not-applicable')
+    assert.equal(questionCalls, 0)
+    assert.equal(requestedServices.includes('userQuestions'), false)
+    assert.equal(sessionEvents.some(event => event.type === 'emate/image-output'
+      && (event.data.status === 'needs-review' || event.data.revision === 3)), false)
+    imageReviewAsk = undefined
+
 
     const imagePack = tools.get('image_pack')
     await assert.rejects(
@@ -2238,38 +2069,27 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     )
     assert.equal(existsSync(join(temporary, '.e-mate', 'images')), false)
     sandboxMode = 'workspace-write'
-    await assert.rejects(
-      imagePack.execute({ image_url: [rejectedCandidateId] }, execution()),
-      /not a successful current-session image output/u,
-    )
+    const unverifiedOutput = await context.attachments.saveImage({ data: rejectedBytes, mediaType: 'image/png', name: 'unverified.png' })
     sessionMessages.push({
       id: 'unverified-image-tool-result', source: { kind: 'tool', callId: 'image-call-unverified-pack' },
-      content: [{
-        type: 'tool-result', toolCallId: 'image-call-unverified-pack', isError: false,
-        content: [{ type: 'image', attachment: implicitEdit.images[0].image }],
-      }],
+      content: [{ type: 'tool-result', toolCallId: 'image-call-unverified-pack', isError: false,
+        content: [{ type: 'image', attachment: unverifiedOutput }] }],
     })
     await assert.rejects(
-      imagePack.execute({ image_url: [attachmentId, implicitEdit.images[0].image.attachmentId] }, execution()),
+      imagePack.execute({ image_url: [attachmentId, unverifiedOutput.attachmentId] }, execution()),
       /not a successful current-session image output/u,
     )
-    sessionEvents.push({
-      type: 'emate/image-output',
-      data: {
-        status: 'completed',
-        output: implicitEdit.images[0].image,
-        content: [{ type: 'image', attachment: implicitEdit.images[0].image }],
-      },
-    })
+    sessionEvents.push({ type: 'emate/image-output', data: {
+      status: 'completed', output: unverifiedOutput,
+      content: [{ type: 'image', attachment: unverifiedOutput }],
+    } })
     await assert.rejects(
-      imagePack.execute({ image_url: [implicitEdit.images[0].image.attachmentId] }, execution()),
+      imagePack.execute({ image_url: [unverifiedOutput.attachmentId] }, execution()),
       /not a successful current-session image output/u,
     )
     sessionEvents.pop()
     assert.equal(existsSync(join(temporary, '.e-mate', 'images')), false)
-    const confirmedPack = await imagePack.execute({
-      image_url: [confirmedEdit.images[0].image.attachmentId],
-    }, execution())
+    const confirmedPack = await imagePack.execute({ image_url: [explicitEdit.images[0].image.attachmentId] }, execution())
     assert.equal(confirmedPack.image_count, 1)
     const legacyChildOutput = await context.attachments.saveImage({
       data: readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.zh.png', import.meta.url)),
@@ -2293,13 +2113,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       data: {
         ...legacyChildReceipt,
         call_id: 'invalid-legacy-child-receipt-v2',
-        output: rejectedReceipt.output,
-        content: [{ type: 'image', attachment: rejectedReceipt.output }],
+        output: unverifiedOutput,
+        content: [{ type: 'image', attachment: unverifiedOutput }],
         unexpected: true,
       },
     })
     await assert.rejects(
-      imagePack.execute({ image_url: [rejectedReceipt.output.attachmentId] }, execution()),
+      imagePack.execute({ image_url: [unverifiedOutput.attachmentId] }, execution()),
       /not a successful current-session image output/u,
     )
     sessionEvents.pop()
@@ -2884,6 +2704,10 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(requests.length, requestsBeforeNoop + 1)
     assert.equal(sessionEvents.at(-1).data.status, 'failed')
     assert.equal(sessionEvents.at(-1).data.failure_code, 'source-output-same-sha256')
+    assert.equal(sessionEvents.at(-1).data.revision, 2)
+    assert.deepEqual(sessionEvents.at(-1).data.verifier, { structural: 'attachment-cas-v1', semantic: 'not-configured' })
+    assert.equal(sessionEvents.at(-1).data.verification.semantic, 'failed')
+    assert.equal(sessionEvents.at(-1).data.verification.human_review, undefined)
     assert.equal(sessionEvents.at(-1).data.content.length, 0)
     assert.equal((await imagePack.execute({ image_url: [second.attachmentId] }, execution())).image_count, 1)
 

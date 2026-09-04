@@ -12,7 +12,7 @@ import { installImageBatchRecovery, readDurableImageBatchResult } from './image-
 export const name = 'emate-image-generation'
 export const inject = [
   'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
-  'sessionProjectionCache', 'sessionPersistence', 'sessions', 'agents', 'subagents',
+  'sessionProjectionCache', 'sessionPersistence', 'sessions', 'subagents',
   'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
 ]
 
@@ -151,12 +151,10 @@ function sessionIdentity(agent) {
   return id
 }
 
-function verifier(operation, reviewDecision) {
+function verifier(operation, status) {
   return {
     structural: 'attachment-cas-v1',
-    semantic: operation === 'generate'
-      ? 'not-required'
-      : reviewDecision === undefined ? 'not-configured' : 'native-user-confirmation-v1',
+    semantic: operation === 'generate' || status === 'completed' ? 'not-required' : 'not-configured',
   }
 }
 
@@ -303,34 +301,6 @@ function imageOperation(refs) {
   return refs.length === 0 ? 'generate' : refs.length === 1 ? 'edit' : 'fusion'
 }
 
-function sha256Text(value) {
-  return createHash('sha256').update(value).digest('hex')
-}
-
-function textReplacementAcceptance(prompt, status = 'needs-review') {
-  const patterns = [
-    /(?:共\s*)?(\d+)\s*处\s*[“"']?([^“”"'，。,.;]{1,32})[”"']?\s*(?:全部)?\s*(?:改为|改成|替换为|换成)\s*[“"']?([^“”"'，。,.;]{1,32})/iu,
-    /(?:把|将)?\s*(?:图片|图像|图)?(?:中|里|上)(?:的)?\s*[“"']?([^“”"'，。,.;]{1,32})[”"']?\s*(?:全部)?\s*(?:改为|改成|替换为|换成)\s*[“"']?([^“”"'，。,.;]{1,32})/iu,
-    /\breplace\s+[“"']?([^“”"'\n]{1,64})[”"']?\s+with\s+[“"']?([^“”"'\n]{1,64})/iu,
-  ]
-  for (const [index, pattern] of patterns.entries()) {
-    const match = pattern.exec(prompt)
-    if (match === null) continue
-    const offset = index === 0 ? 1 : 0
-    const oldText = match[1 + offset]?.trim()
-    const newText = match[2 + offset]?.trim()
-    if (!oldText || !newText || oldText === newText) return undefined
-    const requested = index === 0 ? Number(match[1]) : null
-    return {
-      old_text_sha256: sha256Text(oldText),
-      new_text_sha256: sha256Text(newText),
-      requested_regions: Number.isSafeInteger(requested) && requested > 0 ? requested : null,
-      status,
-    }
-  }
-  return undefined
-}
-
 function failureCode(error, submitted, aborted) {
   if (aborted) return 'cancelled'
   if (error?.code === 'agent-tool-unavailable') return 'agent-tool-unavailable'
@@ -430,35 +400,17 @@ function assertFreshParentCall(agent, callId) {
   throw new Error('image call already has a terminal receipt; use a new explicit retry Tool call')
 }
 
-function imageResultStatus(refs, value, reviewDecision) {
-  const operation = imageOperation(refs)
-  if (operation === 'generate') return 'completed'
-  if (refs.some(ref => ref.attachmentId === value.image.attachmentId)) return 'failed'
-  return reviewDecision === 'accepted' ? 'completed' : reviewDecision === 'rejected' ? 'failed' : 'needs-review'
+function imageResultStatus(refs, value) {
+  return refs.some(ref => ref.attachmentId === value.image.attachmentId) ? 'failed' : 'completed'
 }
 
-function verifiedReceipt(
-  callId,
-  task,
-  refs,
-  value,
-  jobId,
-  parentSessionId,
-  clientRequestId,
-  reviewDecision,
-  revision = 2,
-) {
+function verifiedReceipt(callId, refs, value, jobId, parentSessionId, clientRequestId) {
   const operation = imageOperation(refs)
   const sameSource = refs.some(ref => ref.attachmentId === value.image.attachmentId)
-  const status = imageResultStatus(refs, value, reviewDecision)
-  const semantic = operation === 'generate'
-    ? 'not-applicable'
-    : sameSource || reviewDecision === 'rejected' ? 'failed'
-      : reviewDecision === 'accepted' ? 'passed' : 'needs-review'
-  const textReplacement = operation === 'generate' ? undefined : textReplacementAcceptance(task.prompt, semantic)
+  const status = imageResultStatus(refs, value)
   return {
     schema_version: IMAGE_RECEIPT_VERSION,
-    revision,
+    revision: 2,
     call_id: String(callId),
     operation,
     status,
@@ -471,137 +423,13 @@ function verifiedReceipt(
     client_request_id: clientRequestId,
     model: value.model,
     output: imageRef(value.image),
-    verifier: verifier(operation, reviewDecision),
+    verifier: verifier(operation, status),
     verification: {
       structural: 'passed',
       source_output: operation === 'generate' ? 'not-applicable' : sameSource ? 'same' : 'distinct',
-      semantic,
-      ...(reviewDecision === undefined ? {} : {
-        human_review: {
-          decision: reviewDecision,
-          requirement_sha256: sha256Text(task.prompt),
-        },
-      }),
-      ...(textReplacement === undefined ? {} : { text_replacement: textReplacement }),
+      semantic: sameSource ? 'failed' : 'not-applicable',
     },
-    ...(sameSource
-      ? { failure_code: 'source-output-same-sha256' }
-      : reviewDecision === 'rejected' ? { failure_code: 'user-rejected' } : {}),
-  }
-}
-
-async function requireImageFlush(ctx, owner, label) {
-  try {
-    if (await ctx.sessions.flush(owner.session) === true) return
-  } catch (error) {
-    const failure = new Error(label + ' flush failed', { cause: error })
-    ;(failure as Error & { code: string }).code = 'image-review-persistence'
-    throw failure
-  }
-  const failure = new Error(label + ' did not reach durable storage')
-  ;(failure as Error & { code: string }).code = 'image-review-persistence'
-  throw failure
-}
-
-function combinedReviewPersistence(primary, cleanup) {
-  const failure = new AggregateError([primary, cleanup], 'image batch review and cleanup persistence failed', { cause: primary })
-  ;(failure as AggregateError & { code: string }).code = 'image-review-persistence'
-  return failure
-}
-
-async function reviewImageCandidate(
-  ctx,
-  owner,
-  questionOwner,
-  callId,
-  task,
-  refs,
-  value,
-  jobId,
-  parentSessionId,
-  clientRequestId,
-  signal,
-  durableBatchReview = false,
-) {
-  const candidate = verifiedReceipt(callId, task, refs, value, jobId, parentSessionId, clientRequestId)
-  appendImageReceipt(owner, candidate)
-  if (durableBatchReview) {
-    try {
-      await requireImageFlush(ctx, owner, 'image batch review candidate')
-    } catch (primary) {
-      const cancelled = failedReceipt(
-        callId, imageOperation(refs), refs, 'cancelled', true, 'cancelled', parentSessionId,
-        jobId, clientRequestId, value.request_id, 3,
-      )
-      appendImageReceipt(owner, cancelled)
-      try {
-        await requireImageFlush(ctx, owner, 'image batch review candidate cleanup')
-      } catch (cleanup) {
-        throw combinedReviewPersistence(primary, cleanup)
-      }
-      throw primary
-    }
-  }
-  const userQuestions = ctx.get('userQuestions')
-  if (userQuestions === undefined) {
-    if (!durableBatchReview) return undefined
-    const cancelled = failedReceipt(
-      callId, imageOperation(refs), refs, 'cancelled', true, 'cancelled', parentSessionId,
-      jobId, clientRequestId, value.request_id, 3,
-    )
-    appendImageReceipt(owner, cancelled)
-    await requireImageFlush(ctx, owner, 'image batch unavailable review')
-    throw new Error('image batch parent review route is unavailable')
-  }
-  const approve = '确认结果'
-  const reject = '拒绝结果'
-  const questionId = `image-review-${jobId}`
-  const sources = refs.map(imageRef)
-  const output = imageRef(value.image)
-  const detail = [
-    '修改目标：', task.prompt, '', '图片对照信息：',
-    ...sources.map((source, index) => `- 源图 ${index + 1}：${source.name ?? '未命名图片'}（${source.width}×${source.height}）`),
-    `- 候选结果：${output.name ?? '改图候选'}（${output.width}×${output.height}）`,
-    '- 系统已确认候选文件与源文件不同；修改语义仍需你对照图片确认。',
-  ].join('\n')
-  let finalAppended = false
-  try {
-    const answer = await userQuestions.ask({
-      agent: questionOwner,
-      signal,
-      questions: [{ id: questionId, header: '改图结果确认',
-        question: '请对照源图确认候选结果是否完整完成修改目标。', detail,
-        options: [
-          { label: approve, description: '确认候选图已完整满足修改目标。' },
-          { label: reject, description: '结果不正确；本次任务失败，可显式重新修改。' },
-        ],
-        intent: { kind: 'image-review', approve, sources, output },
-      }],
-    })
-    const selected = answer?.answers?.find(item => item?.id === questionId)
-    const decision = selected?.custom === undefined && selected?.selected?.length === 1
-      && selected.selected[0] === approve ? 'accepted' : 'rejected'
-    if (!durableBatchReview) return decision
-    const finalReceipt = verifiedReceipt(
-      callId, task, refs, value, jobId, parentSessionId, clientRequestId, decision, 3,
-    )
-    appendImageReceipt(owner, finalReceipt)
-    finalAppended = true
-    await requireImageFlush(ctx, owner, 'image batch final review')
-    return { decision, finalReceipt }
-  } catch (error) {
-    if (finalAppended) throw error
-    if (!durableBatchReview) {
-      if (signal.aborted) throw error
-      return undefined
-    }
-    const cancelled = failedReceipt(
-      callId, imageOperation(refs), refs, 'cancelled', true, 'cancelled', parentSessionId,
-      jobId, clientRequestId, value.request_id, 3,
-    )
-    appendImageReceipt(owner, cancelled)
-    await requireImageFlush(ctx, owner, 'image batch cancelled review')
-    throw error
+    ...(sameSource ? { failure_code: 'source-output-same-sha256' } : {}),
   }
 }
 
@@ -634,8 +462,9 @@ function validVerification(value, operation, status, sameSource) {
       return humanReview === undefined && value.structural === 'passed'
         && value.source_output === 'not-applicable' && value.semantic === 'not-applicable'
     }
-    return !sameSource && humanReview?.decision === 'accepted'
-      && value.structural === 'passed' && value.source_output === 'distinct' && value.semantic === 'passed'
+    return !sameSource && value.structural === 'passed' && value.source_output === 'distinct'
+      && (humanReview?.decision === 'accepted' && value.semantic === 'passed'
+        || humanReview === undefined && value.semantic === 'not-applicable')
   }
   if (status === 'needs-review') {
     return operation !== 'generate' && !sameSource && humanReview === undefined && value.structural === 'passed'
@@ -676,8 +505,9 @@ function validReceiptV2(value, refs, parentSessionId, childSessionId) {
     || !exactKeys(value.verifier, ['semantic', 'structural'])
     || value.verifier.structural !== 'attachment-cas-v1'
     || value.verifier.semantic !== (value.operation === 'generate'
-      ? 'not-required'
-      : value.verification?.human_review === undefined ? 'not-configured' : 'native-user-confirmation-v1')
+      || value.status === 'completed' && value.verification?.human_review === undefined
+        ? 'not-required'
+        : value.verification?.human_review === undefined ? 'not-configured' : 'native-user-confirmation-v1')
     || value.failure_code !== undefined && (typeof value.failure_code !== 'string' || value.failure_code.length > 128)
     || value.job_id !== undefined && (typeof value.job_id !== 'string' || value.job_id.length === 0)
     || value.provider_request_id !== undefined
@@ -1218,7 +1048,7 @@ function startImageJob(ctx, owner, execSignal, operation) {
             status: value.status === 'completed' ? 'completed' : 'failed',
             detail: value.status === 'completed'
               ? '1 image, 0 failures'
-              : value.status === 'needs-review' ? '1 image needs review' : 'image verification failed',
+              : 'image verification failed',
             output: JSON.stringify({
               image_count: value.status === 'completed' ? 1 : 0,
               failure_count: value.status === 'completed' ? 0 : 1,
@@ -1246,7 +1076,7 @@ const imageOutput = {
       job_id: { type: 'string', required: true },
       images: { type: 'array', required: true, items: { type: 'json' } },
       failures: { type: 'array', required: true, items: { type: 'json' } },
-      status: { type: 'string', required: true, enum: ['completed', 'needs-review'] },
+      status: { type: 'string', required: true, enum: ['completed'] },
       receipt: { type: 'json', required: true },
     },
   },
@@ -1255,9 +1085,7 @@ const imageOutput = {
     const fileName = receiptImageName(image.name) ?? `e-Mate-image.${imageExtension(image.mediaType)}`
     return [{
       type: 'text',
-      text: value.status === 'completed'
-        ? `Image generation completed: 1 image (${fileName}).`
-        : `Image edit saved: 1 image (${fileName}) awaiting human confirmation.`,
+      text: `Image generation completed: 1 image (${fileName}).`,
     }]
   },
   presentationMeta: (_args, value) => {
@@ -1270,53 +1098,20 @@ const imageOutput = {
       width: image.width,
       height: image.height,
     }
-    if (value.status === 'completed') {
-      return {
-        $eMateDeliverables: {
-          schema_version: 1,
-          items: [{
-            kind: 'image',
-            name: image.name ?? `e-Mate-image.${imageExtension(image.mediaType)}`,
-            mime: image.mediaType,
-            size: image.bytes,
-            sha256: image.attachmentId.slice('sha256:'.length),
-            locator,
-          }],
-        },
-      }
-    }
     return {
       $eMateDeliverables: {
-        schema_version: 2,
-        items: [],
-        review_candidates: [{
+        schema_version: 1,
+        items: [{
           kind: 'image',
-          operation: value.receipt.operation,
-          reason: 'semantic-verifier-unavailable',
-          name: `e-Mate-image-review.${imageExtension(image.mediaType)}`,
+          name: image.name ?? `e-Mate-image.${imageExtension(image.mediaType)}`,
           mime: image.mediaType,
           size: image.bytes,
           sha256: image.attachmentId.slice('sha256:'.length),
           locator,
-          sources: value.receipt.sources.map(source => ({
-            kind: 'image-attachment',
-            attachment_id: source.attachmentId,
-            media_type: source.mediaType,
-            bytes: source.bytes,
-            width: source.width,
-            height: source.height,
-          })),
         }],
       },
     }
   },
-}
-
-function finalReceiptRevision(agent, callId) {
-  return agent.session.events.some(event => event?.type === 'emate/image-output'
-    && event.data?.call_id === String(callId)
-    && event.data?.revision === 2
-    && event.data?.status === 'needs-review') ? 3 : 2
 }
 
 const imagePackOutput = {
@@ -1406,8 +1201,6 @@ export async function apply(ctx, config = {}) {
   ctx.sessionProjections.register(imageReceiptsProjectionDefinition(z))
   ctx.sessionProjections.register(imageBatchProjectionDefinition(z))
   const nativeImageTasks = createNativeImageTaskRuntime(ctx, {
-    sourceReviewAvailable: parent => ctx.get('userQuestions') !== undefined
-      && ctx.agents.get(parent.id) === parent && ctx.agents.roots().includes(parent),
     resolveSources: (parent, attachmentIds, signal) => resolveBatchSources(ctx, parent, attachmentIds, signal),
     readDurableResult: (parent, batchId, signal) => readDurableImageBatchResult(ctx, parent, batchId, signal),
   })
@@ -1497,38 +1290,7 @@ export async function apply(ctx, config = {}) {
             () => { ambiguousDispatch = true },
             value => { providerRequestId = value },
           )
-          let reviewDecision
-          let finalReceipt
-          if (imageResultStatus(refs, value) === 'needs-review') {
-            if (started?.id === undefined) throw new Error('image Job identity is unavailable for native review')
-            let reviewed
-            try {
-              reviewed = await reviewImageCandidate(
-                ctx,
-              exec.agent,
-              batchClaim?.sourceTask === true ? batchClaim.reviewOwner : exec.agent,
-              exec.callId,
-              task,
-              refs,
-              value,
-              started.id,
-              parentSessionId,
-              clientRequestId,
-              signal,
-                batchClaim?.sourceTask === true,
-              )
-            } catch (error) {
-              if (error?.code === 'image-review-persistence') batchClaim?.reportReviewFailure(error)
-              throw error
-            }
-            if (isRecord(reviewed)) {
-              reviewDecision = reviewed.decision
-              finalReceipt = reviewed.finalReceipt
-            } else {
-              reviewDecision = reviewed
-            }
-          }
-          return { ...value, reviewDecision, finalReceipt, status: imageResultStatus(refs, value, reviewDecision) }
+          return { ...value, status: imageResultStatus(refs, value) }
         })
         let image
         try {
@@ -1538,22 +1300,11 @@ export async function apply(ctx, config = {}) {
           throw error
         }
         await ctx.jobs.wait(started.id, IMAGE_TIMEOUT_MS, exec.agent, exec.signal)
-        const receipt = image.finalReceipt ?? verifiedReceipt(
-          exec.callId,
-          task,
-          refs,
-          image,
-          started.id,
-          parentSessionId,
-          clientRequestId,
-          image.reviewDecision,
-          finalReceiptRevision(exec.agent, exec.callId),
+        const receipt = verifiedReceipt(
+          exec.callId, refs, image, started.id, parentSessionId, clientRequestId,
         )
-        if (image.finalReceipt === undefined) appendImageReceipt(exec.agent, receipt)
+        appendImageReceipt(exec.agent, receipt)
         if (receipt.status === 'failed') {
-          if (receipt.failure_code === 'user-rejected') {
-            throw new Error('e-Mate image edit was rejected by the user; use a new explicit retry Tool call')
-          }
           throw new Error('e-Mate image edit verification failed because source and output have the same SHA-256')
         }
         return {
@@ -1564,7 +1315,7 @@ export async function apply(ctx, config = {}) {
           receipt,
         }
       } catch (error) {
-        const revision = finalReceiptRevision(exec.agent, exec.callId)
+        const revision = 2
         const alreadyRecorded = exec.agent.session.events.some(event => event?.type === 'emate/image-output'
           && event.data?.schema_version === IMAGE_RECEIPT_VERSION
           && event.data?.call_id === String(exec.callId)
@@ -1592,10 +1343,8 @@ export async function apply(ctx, config = {}) {
             revision,
           ))
         }
-        if (error instanceof Error && [
-          'e-Mate image edit was rejected by the user; use a new explicit retry Tool call',
-          'e-Mate image edit verification failed because source and output have the same SHA-256',
-        ].includes(error.message)) throw error
+        if (error instanceof Error
+          && error.message === 'e-Mate image edit verification failed because source and output have the same SHA-256') throw error
         const status = exec.agent.session.events.findLast(event => event?.type === 'emate/image-output'
           && event.data?.call_id === String(exec.callId)
           && event.data?.status !== 'running')?.data?.status ?? 'failed'

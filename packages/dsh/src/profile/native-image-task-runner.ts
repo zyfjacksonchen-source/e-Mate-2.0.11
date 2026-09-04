@@ -164,11 +164,10 @@ interface Gate {
   isOpen: boolean
   settled: boolean
   run?: SubagentRunLike
-  reviewFailure?: unknown
   timer: ReturnType<typeof setTimeout>
 }
 function createGate(parentSessionId: string, parentCallId: string, taskId: string, task: NormalizedImageBatchTask,
-  parent: AgentLike, sources: readonly ImageAttachmentRef[], parentSignal: AbortSignal, deadlineMs: number): Gate {
+  sources: readonly ImageAttachmentRef[], parentSignal: AbortSignal, deadlineMs: number): Gate {
   const controller = new AbortController()
   let resolveOpen!: (value: string) => void
   let rejectOpen!: (reason: unknown) => void
@@ -178,7 +177,7 @@ function createGate(parentSessionId: string, parentCallId: string, taskId: strin
   void opened.catch(() => undefined)
   const onAbort = () => gate.fail(parentSignal.reason ?? new Error('image batch cancelled'))
   const gate: Gate = {
-    nonce: randomBytes(32).toString('base64url'), parentSessionId, parentCallId, taskId, task, parent, sources, controller, opened, claimed,
+    nonce: randomBytes(32).toString('base64url'), parentSessionId, parentCallId, taskId, task, sources, controller, opened, claimed,
     isOpen: false, settled: false,
     open() { if (!gate.settled) { gate.isOpen = true; gate.settled = true; resolveOpen(gate.taskId) } },
     fail(reason) { controller.abort(reason); if (!gate.settled) { gate.settled = true; rejectOpen(reason) } },
@@ -195,7 +194,6 @@ function createGate(parentSessionId: string, parentCallId: string, taskId: strin
 /** Creates effect-owned nonce gates and a bounded native child executor for image_batch. */
 export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
   deadlineMs?: number
-  sourceReviewAvailable?(parent: AgentLike): boolean
   resolveSources?(parent: AgentLike, attachmentIds: readonly string[], signal: AbortSignal): Promise<readonly ImageAttachmentRef[]>
   readDurableResult?(parent: AgentLike, batchId: string, signal: AbortSignal): Promise<unknown>
 } = {}) {
@@ -216,7 +214,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
     await Promise.allSettled([...active].map(cleanup))
   }, 'emate.image-batch: abort active native children')
 
-  async function claim(agent: AgentLike, args: unknown): Promise<{ taskId: string; batchId: string; ordinal: number; reviewOwner: AgentLike; sourceTask: boolean; reportReviewFailure(reason: unknown): void } | undefined> {
+  async function claim(agent: AgentLike, args: unknown): Promise<{ taskId: string; batchId: string; ordinal: number } | undefined> {
     if (agent.session.header.origin !== 'subagent') return undefined
     const value = descriptor(agent)
     if (value === undefined || typeof value.label !== 'string' || !value.label.startsWith(LABEL_PREFIX)) return undefined
@@ -237,9 +235,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
     }
     const taskId = await gate.opened
     gate.controller.signal.throwIfAborted()
-    return { taskId, batchId: imageBatchId(gate.parentSessionId, gate.parentCallId), ordinal: gate.task.ordinal,
-      reviewOwner: gate.parent, sourceTask: gate.task.attachmentIds.length > 0,
-      reportReviewFailure(reason) { gate.reviewFailure = reason; gate.fail(reason) } }
+    return { taskId, batchId: imageBatchId(gate.parentSessionId, gate.parentCallId), ordinal: gate.task.ordinal }
   }
 
   const flush = async (session: SessionLike, label: string) => {
@@ -276,9 +272,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
     replayGuard(session, sessionId, callId)
     const preparedSources = new Map<number, readonly ImageAttachmentRef[]>()
     if (request.tasks.some(task => task.attachmentIds.length > 0)) {
-      if (options.resolveSources === undefined || options.sourceReviewAvailable?.(parent) !== true) {
-        throw new Error('image batch source review route is unavailable')
-      }
+      if (options.resolveSources === undefined) throw new Error('image batch source resolution is unavailable')
       const uniqueIds = [...new Set(request.tasks.flatMap(task => task.attachmentIds))]
       const resolved = await options.resolveSources(parent, uniqueIds, exec.signal)
       if (resolved.length !== uniqueIds.length
@@ -336,7 +330,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
     const runTask = async (task: NormalizedImageBatchTask) => {
       if (fatal !== undefined || exec.signal.aborted || disposed) return
       const sources = preparedSources.get(task.ordinal) ?? []
-      const gate = createGate(sessionId, callId, imageBatchTaskId(sessionId, callId, task.ordinal), task, parent, sources, exec.signal, deadlineMs)
+      const gate = createGate(sessionId, callId, imageBatchTaskId(sessionId, callId, task.ordinal), task, sources, exec.signal, deadlineMs)
       lookup.set(gate.nonce, gate); active.add(gate)
       let proven: ProvenImage | undefined
       let terminalPointer: ImageBatchReceiptPointer | undefined
@@ -363,11 +357,6 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
           child_session_id: gate.claimedChildId, updated_at: new Date().toISOString() }, 'image batch task link')
         gate.open()
         await run.result
-        if (gate.reviewFailure !== undefined) {
-          const failure = new PersistenceError('image batch child review persistence failed')
-          failFatal(failure)
-          throw failure
-        }
         try { await flush(run.localAgent.session, 'image batch child result') } catch (error) { failFatal(error); throw error }
 
         const events = [...run.localAgent.session.events]
@@ -379,7 +368,6 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
         const reviews = reviewEvents.map(event => receipt(event.data, gate.claimedChildId!, event.seq, task, sources))
         const parsed = finalEvents.map(event => receipt(event.data, gate.claimedChildId!, event.seq, task, sources))
         if (reviewEvents.length > 1 || task.operation === 'generate' && reviewEvents.length !== 0
-          || task.operation !== 'generate' && reviewEvents.length === 0 && parsed[0]?.receipt.status === 'completed'
           || reviewEvents.length === 1 && (reviews[0].receipt.revision !== 2 || parsed[0]?.receipt.revision !== 3
             || reviews[0].receipt.call_id !== parsed[0]?.receipt.call_id || reviewEvents[0].seq >= finalEvents[0]?.seq)) {
           throw new Error('native image child review receipt sequence is invalid')
