@@ -28,7 +28,7 @@ describe.runIf(process.platform === 'win32')('Windows managed Profile materializ
     const computerUseRoot = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
     const computerUsePatch = readFileSync(join(computerUseRoot, 'cordis.patch.yml'), 'utf8')
     expect((computerUsePatch.match(/id: emate-computer-use/gu) ?? []).length).toBe(1)
-    expect(computerUsePatch).toContain("['darwin', 'win32']")
+    expect(computerUsePatch).toContain("disabled: !!js Array.of('darwin', 'win32').includes(process.platform) === false")
     expect(computerUsePatch).toContain("process.platform === 'win32' ? 'hidden' : 'visible'")
     const publicTypes = readFileSync(join(computerUseRoot, 'lib', 'types', 'types.d.ts'), 'utf8')
     expect(publicTypes).not.toMatch(/executablePath|processStartTime|windowId/u)

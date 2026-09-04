@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -389,6 +390,7 @@ describe('Electron compatibility runtime', () => {
     writeFileSync(outsideFile, 'outside bytes')
     symlinkSync(outside, escape, hostPlatform === 'win32' ? 'junction' : 'dir')
     try {
+      const canonicalSource = await realpath(source)
       const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
       const runtime = new ElectronDesktopRuntime(async () => {})
       const release = runtime.schedule({
@@ -401,9 +403,9 @@ describe('Electron compatibility runtime', () => {
       const resource = { kind: 'file', sessionId: 'session-files', root, path: source }
 
       await runResource({ sender: electron.webContents }, { action: 'copy-path', resource })
-      expect(electron.clipboard.writeText).toHaveBeenCalledWith(realpathSync(source))
+      expect(electron.clipboard.writeText).toHaveBeenCalledWith(canonicalSource)
       await runResource({ sender: electron.webContents }, { action: 'reveal', resource })
-      expect(electron.shell.showItemInFolder).toHaveBeenCalledWith(realpathSync(source))
+      expect(electron.shell.showItemInFolder).toHaveBeenCalledWith(canonicalSource)
 
       electron.dialog.showSaveDialog.mockResolvedValueOnce({ canceled: false, filePath: copied })
       await runResource({ sender: electron.webContents }, { action: 'save-as', resource })
@@ -412,7 +414,7 @@ describe('Electron compatibility runtime', () => {
       electron.dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ['/Applications/Preview.app'] })
       const opening = runResource({ sender: electron.webContents }, { action: 'open-with', resource })
       await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledWith(
-        '/usr/bin/open', ['-a', '/Applications/Preview.app', '--', realpathSync(source)], expect.any(Object),
+        '/usr/bin/open', ['-a', '/Applications/Preview.app', '--', canonicalSource], expect.any(Object),
       ) })
       childProcess.emit('spawn')
       await opening
@@ -420,7 +422,7 @@ describe('Electron compatibility runtime', () => {
       const copying = runResource({ sender: electron.webContents }, { action: 'copy-file', resource })
       await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenLastCalledWith(
         '/usr/bin/osascript', expect.any(Array), expect.objectContaining({
-          env: expect.objectContaining({ E_MATE_COPY_PATH: realpathSync(source) }),
+          env: expect.objectContaining({ E_MATE_COPY_PATH: canonicalSource }),
         }),
       ) })
       childProcess.emit('spawn')
