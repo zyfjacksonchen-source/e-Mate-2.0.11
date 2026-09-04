@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 import React, { useMemo, useState } from 'react'
+import * as jsxRuntime from 'react/jsx-runtime'
+import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { addNativeImages, apply, FILE_PICK_EVENT, FileCards, FileImportControl } from '../src/client/index.tsx'
+import { SlotTestRuntime } from '../../../upstream/deepseek-harness/packages/test-support/client-runtime/src/index.ts'
+import { InputBar } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx'
+import { SessionInputShell } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
+import { registerChatNodeRenderers } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/chat/register-node-renderers.ts'
+import { adaptHarnessConversationSource } from '../../../scripts/harness-conversation-adapter.mjs'
+import { addNativeImages, apply, inject, FILE_PICK_EVENT, FileCards, FileImportControl } from '../src/client/index.tsx'
 import { importedDraft, importedMessage, type FileReference } from '../src/client/references.ts'
 
 const imported = {
@@ -159,52 +166,109 @@ describe('file import composer lifecycle', () => {
     expect(ctx.conversation.releaseDraftImages).toHaveBeenCalledWith(images)
   })
 
-  it('keeps the registered native textarea resident across absent and changed sessions without an empty accessory', async () => {
-    let composer: any
+  it('registers against the real native slots and preserves child ownership and the native InputBar lifecycle', async () => {
+    const runtime = await SlotTestRuntime.create()
     let trigger: any
     let lastNativeProps: any
     let live: any
+    let finishImport!: (value: unknown) => void
+    const callImport = vi.fn(() => new Promise(resolve => { finishImport = resolve }))
     const Native = (props: any) => {
       lastNativeProps = props
-      return <div data-composer-card>{props.accessory}<textarea readOnly value={live?.draft ?? ''} />{props.leftItems}</div>
+      return <InputBar {...props} />
     }
-    const guard = vi.fn(() => true)
-    const scope = { bail: guard }
-    const ctx: any = {
-      effect: (register: any) => register(),
-      get: () => ({ registerSource(source: any) { trigger = source; return () => {} } }),
-      slots: {
-        inject: (name: string, register: any) => { if (name === 'conversation.composer.bar') register() },
-        entries: () => [{ component: Native, options: {}, inject: () => ({}), children: {}, locale: 'conversation' }],
-        register: (_options: any, Component: any) => { composer = Component; return () => {} },
-      },
-      sessions: { scope: () => scope },
-      conversation: { input: { for: () => ({ notify: vi.fn() }) } },
-      connection: { isLoopback: true, rpc: { call: vi.fn() } },
-    }
-    apply(ctx)
-    const props = { useInput: (select: any) => select(live), leftItems: <span>原生工具</span> }
-    const view = render(React.createElement(composer, props))
-    const textarea = screen.getByRole('textbox')
-    expect(lastNativeProps.accessory).toBeUndefined()
-    live = { draft: '', fileRefs: [], phase: 'plain' }
-    const actions = { addFiles: vi.fn(() => true), removeFile: vi.fn() }
-    view.rerender(React.createElement(composer, { ...props, sessionId: 'one', inputActions: actions }))
-    expect(screen.getByRole('textbox')).toBe(textarea)
-    view.rerender(React.createElement(composer, { ...props, sessionId: 'two', inputActions: actions }))
-    expect(screen.getByRole('textbox')).toBe(textarea)
-    expect(lastNativeProps.accessory).toBeUndefined()
-    expect(screen.getByText('原生工具')).toBeTruthy()
     const picked = vi.fn()
-    document.addEventListener(FILE_PICK_EVENT, picked)
     try {
+      const shell = new SessionInputShell({ actx: {} as never, defaultSink: vi.fn() })
+      const absentMenu = { getSnapshot: () => null, subscribe: () => () => {} }
+      const locale = { revision: 0 }
+      runtime.slots.installLocale({ getSnapshot: () => locale, subscribe: () => () => {}, bind: () => (key: string) => key } as never)
+      runtime.provide('inputTriggers', { registerSource(source: any) { trigger = source; return () => {} } } as never)
+      runtime.provide('connection', { isLoopback: true, rpc: { call: callImport } } as never)
+      runtime.provide('conversation', { input: { for: () => ({ notify: vi.fn() }) }, draftImages: () => [] } as never)
+      await runtime.sessions.add({ id: 'one' }, { current: false })
+      await runtime.sessions.add({ id: 'two' }, { current: false })
+      await runtime.declare({
+        'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
+        'conversation.chat.node': { kind: 'keyed', scope: 'session' },
+      } as never)
+      // Execute the exact adapted native registration, including its children
+      // and inject. SlotTestRuntime uses production SlotRegistry + web-react.
+      const source = adaptHarnessConversationSource(readFileSync('upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', 'utf8'))
+      const start = source.indexOf('\t\t\tslots.register({\n\t\t\t\tname: "conversation.composer.bar",')
+      const end = source.indexOf('\t\t\tslots.register({\n\t\t\t\tname: "conversation.composer",', start)
+      expect(start).toBeGreaterThan(0)
+      expect(end).toBeGreaterThan(start)
+      await runtime.mount({ inject: ['slots'], apply(ctx: any) {
+        new Function('env', `const { slots, InputBar, react_jsx_runtime, NS, inputHub, concreteConversation, ctx, submissionPolicy, ABSENT_NOTICES, ABSENT_LEXICON, ABSENT_MENU_LAUNCHER } = env;\n${source.slice(start, end)}`)({
+          slots: ctx.slots, InputBar: Native, react_jsx_runtime: jsxRuntime, NS: 'conversation', ctx,
+          inputHub: { shell: () => shell, inputTriggers: () => undefined }, concreteConversation: () => ctx.conversation,
+          submissionPolicy: { resolve: () => 'queue' }, ABSENT_NOTICES: shell.notices,
+          ABSENT_LEXICON: shell.lexicon, ABSENT_MENU_LAUNCHER: absentMenu,
+        })
+        registerChatNodeRenderers(ctx)
+        ctx.slots.register({ name: 'conversation.input.plan' }, () => <button>原生计划</button>)
+        ctx.slots.register({ name: 'conversation.input.model' }, () => <button>原生模型</button>)
+      } })
+      const actions = { ...shell.actions, addFiles: vi.fn(() => true), removeFile: vi.fn() }
+      runtime.renderSlot('conversation.composer.bar' as never, {
+        useInput: (select: any) => select(live), inputActions: actions, leftItems: <span>原生工具</span>,
+      } as never)
+      const nativeTextarea = screen.getByRole('textbox') // Fallback before the product plugin loads.
+      expect(screen.queryByRole('button', { name: '添加本地图片或文件' })).toBeNull()
+      live = { ...shell.snapshot, fileRefs: [] }
+      await runtime.sessions.setCurrent('one')
+      expect(screen.getByRole('textbox')).toBe(nativeTextarea)
+      await runtime.sessions.setCurrent('two')
+      expect(screen.getByRole('textbox')).not.toBe(nativeTextarea)
+      live = undefined
+      await runtime.sessions.setCurrent(undefined)
+      const feature = await runtime.mount({ inject, apply })
+      const textarea = screen.getByRole('textbox')
+      expect(lastNativeProps.accessory).toBeUndefined()
+      expect(runtime.slots.entries('conversation.composer.bar' as never)).toHaveLength(1)
+      expect(runtime.slots.entries('e-mate.conversation.composer' as never)).toHaveLength(1)
+      for (const key of ['user', 'steering']) {
+        const entries = runtime.slots.entries('conversation.chat.node' as never).filter(entry => entry.options.key === key)
+        expect(entries).toHaveLength(2)
+        expect(entries[0]!.children).toBeUndefined()
+      }
+      live = { ...shell.snapshot, fileRefs: [] }
+      await runtime.sessions.setCurrent('one')
+      expect(screen.getByRole('textbox')).toBe(textarea)
+      expect(screen.getByRole('button', { name: '原生计划' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '原生模型' })).toBeTruthy()
+      fireEvent.change(picker(), { target: { files: [file()] } })
+      await waitFor(() => expect(callImport).toHaveBeenCalledOnce())
+      expect(screen.getByRole('button', { name: `移除 ${imported.display_name}` })).toBeTruthy()
+      await runtime.sessions.setCurrent('two')
+      // rc.7 SessionMaybeEntry adopts the first session, then remounts on a
+      // different session; the product follows the same isolation boundary.
+      expect(screen.getByRole('textbox')).not.toBe(textarea)
+      expect(lastNativeProps.accessory).toBeUndefined()
+      finishImport(success)
+      await runtime.flush()
+      expect(screen.queryByRole('button', { name: `移除 ${imported.display_name}` })).toBeNull()
+      expect(actions.addFiles).not.toHaveBeenCalled()
+      expect(screen.getByText('原生工具')).toBeTruthy()
+      const guard = vi.fn(() => true)
+      runtime.sessions.scope('two' as never)!.on('slash/input-consume-token', guard)
+      document.addEventListener(FILE_PICK_EVENT, picked)
       const span = { start: 4, end: 5, draftRev: 8 }
       trigger.onPick({ session: { sessionId: 'two' }, span })
-      expect(guard).toHaveBeenCalledWith(scope, 'slash/input-consume-token', { guard: { kind: 'span', span } })
+      expect(guard).toHaveBeenCalledWith({ guard: { kind: 'span', span } })
       expect(picked).toHaveBeenCalledOnce()
       guard.mockReturnValue(false)
       trigger.onPick({ session: { sessionId: 'two' }, span })
       expect(picked).toHaveBeenCalledOnce()
-    } finally { document.removeEventListener(FILE_PICK_EVENT, picked) }
+      await feature.dispose()
+      expect(runtime.slots.entries('e-mate.conversation.composer' as never)).toHaveLength(0)
+      expect(screen.getByRole('textbox')).toBeTruthy()
+      expect(screen.getByRole('button', { name: '原生计划' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '原生模型' })).toBeTruthy()
+    } finally {
+      document.removeEventListener(FILE_PICK_EVENT, picked)
+      await runtime.dispose()
+    }
   })
 })

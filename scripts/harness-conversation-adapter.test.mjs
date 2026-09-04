@@ -44,6 +44,8 @@ test('every pinned seam fails closed on missing, duplicate or already adapted in
   assert.throws(() => adaptHarnessConversationSource(adapted), /expected one rc\.7 seam/u)
   assert.match(adapted, /const empty = .*input\?\.fileRefs.length/u)
   assert.match(adapted, /inputActions.restoreDraft\(storedDraft, storedFiles \?\? \[\]\)/u)
+  assert.throws(() => adaptHarnessConversationSource(native.replace('}, InputBar);', '}, ChangedInputBar);')), /apply\/composer-body: expected one rc\.7 seam/u)
+  assert.match(adapted, /"e-mate\.conversation\.composer": \{ kind: "single", scope: "session-maybe" \}/u)
 })
 
 test('native scoped chat store persists one file list, cold restores names, and removes only the selected ref', () => {

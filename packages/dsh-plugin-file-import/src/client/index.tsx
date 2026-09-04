@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { createElement, useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import { IconPaperclipOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InputTriggerServiceContract, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
@@ -10,6 +10,12 @@ import { normalizedImage } from './image.ts'
 import { importedDraft, importedMessage, type FileReference } from './references.ts'
 import { parseImportResult, safeThrownImportMessage } from './result.ts'
 import css from './style.module.css'
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'e-mate.conversation.composer': { kind: 'single'; scope: 'session-maybe'; owner: { nativeProps: any; InputBar: ComponentType<any> } }
+  }
+}
 
 export const inject = ['slots', 'connection', 'inputTriggers', 'conversation', 'sessions']
 export const FILE_PICK_EVENT = 'e-mate:file-picker-requested'
@@ -301,19 +307,14 @@ export function apply(ctx: Context): void {
   }
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
   ctx.effect(() => inputTriggers.registerSource(source), 'file-import: @文件 source')
-  ctx.slots.inject('conversation.composer.bar', () => {
-    const native = ctx.slots.entries('conversation.composer.bar').find((entry: any) => (entry.options?.priority ?? 0) === 0)
-    if (native?.component === undefined) throw new Error('native composer is unavailable')
-    return ctx.slots.register({
-      name: 'conversation.composer.bar', id: 'e-mate-file-import', priority: -1,
-      inject: native.inject, children: native.children, locale: native.locale,
-    }, function FileImportComposer(props: any) {
+  ctx.slots.inject('e-mate.conversation.composer', () => {
+    return ctx.slots.register({ name: 'e-mate.conversation.composer' }, function FileImportComposer({ nativeProps: props, InputBar }: any) {
       const input = props.useInput((state: any) => state) ?? EMPTY_INPUT
       return <FileImportControl sessionId={props.sessionId} input={input} inputActions={props.inputActions ?? ABSENT_ACTIONS}
         isLoopback={ctx.connection.isLoopback}
         callImport={payload => ctx.connection.rpc.call(CHANNEL, 'import', payload)}
         addImages={files => props.sessionId === undefined ? '请先选择工作区。' : addNativeImages(ctx, props.sessionId, files)}
-        renderComposer={({ accessory, controls, pending }) => createElement(native.component as any, {
+        renderComposer={({ accessory, controls, pending }) => createElement(InputBar, {
           ...props,
           blocked: props.blocked ?? (pending ? { reason: '附件正在导入，请稍候。' } : undefined),
           accessory: accessory === null ? props.accessory : props.accessory == null ? accessory : <>{props.accessory}{accessory}</>,
@@ -325,7 +326,7 @@ export function apply(ctx: Context): void {
     const disposers = (['user', 'steering'] as const).map(key => {
       const native = ctx.slots.entries('conversation.chat.node').find((entry: any) => entry.options?.key === key && (entry.options?.priority ?? 0) === 0)
       if (native?.component === undefined) throw new Error('native user message renderer is unavailable')
-      return ctx.slots.register({ name: 'conversation.chat.node', key, priority: -1, inject: native.inject, children: native.children, locale: native.locale }, function FileMessage(props: any) {
+      return ctx.slots.register({ name: 'conversation.chat.node', key, priority: -1, inject: native.inject, locale: native.locale }, function FileMessage(props: any) {
         const projected = importedMessage(props.node.data.content, props.node.data.source)
         if (projected.files.length === 0) return createElement(native.component as any, props)
         return <div className={css.message}>

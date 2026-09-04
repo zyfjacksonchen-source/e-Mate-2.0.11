@@ -116,6 +116,12 @@ export function adaptHarnessConversationSource(source) {
 
   // skeleton/InputBar.tsx: toolbar/Enter retain native locks and submit policy.
   change('const empty = draft.trim() === "" && attachments.length === 0;', 'const empty = draft.trim() === "" && attachments.length === 0 && (input?.fileRefs.length ?? 0) === 0;', 'input-bar/empty')
+  // apply.ts: the native entry keeps ownership of plan/model and its assembled
+  // renderSlot binding. Product content decorates that body through one child.
+  change('\t\t\t\tname: "conversation.composer.bar",\n\t\t\t\tlocale: NS,\n\t\t\t\tchildren: {', '\t\t\t\tname: "conversation.composer.bar",\n\t\t\t\tlocale: NS,\n\t\t\t\tchildren: {\n\t\t\t\t\t"e-mate.conversation.composer": { kind: "single", scope: "session-maybe" },', 'apply/composer-declaration')
+  change('\t\t\t}, InputBar);', `\t\t\t}, function EmateComposer(props) {
+\t\t\t\treturn props.renderSlot("e-mate.conversation.composer", { nativeProps: props, InputBar }, { fallback: (0, react_jsx_runtime.jsx)(InputBar, props) });
+\t\t\t});`, 'apply/composer-body')
   // chat/MessageItem.tsx: native pending steering has no keyed renderer. Keep
   // its native actions and show the managed filename until the durable node
   // supplies the richer file-import card projection.
