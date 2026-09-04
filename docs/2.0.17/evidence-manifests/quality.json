@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "ticket": "EM217-503",
+  "claim": "quality-noninferiority-blind-paired-study",
+  "status": "OPEN",
+  "raw_evidence": {
+    "uri": null,
+    "sha256": null
+  },
+  "result": null,
+  "release_gate": "OPEN"
+}
