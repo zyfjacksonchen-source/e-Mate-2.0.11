@@ -1336,6 +1336,9 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     }
     const tools = new Map()
     const imageProjectionDefinitions = []
+    const batchChildren = new Map()
+    let parentProjectionSnapshots = 0
+    const coldProjectionSnapshots = []
     const jobs = []
     const waitedJobs = []
     context.jobs.onJobDone(snapshot => { jobTimeline.push(`settled:${snapshot.id}`) })
@@ -1364,6 +1367,17 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     let sessionCreatedRegistrations = 0
     let recoveryFlushes = 0
     const recoveryBaseline = { requests: requests.length, jobs: jobs.length, policies: policyModels.length }
+    const projectionSnapshot = session => {
+      const ordered = [...session.events].sort((left, right) => left.seq - right.seq)
+      const values = {}
+      for (const definition of imageProjectionDefinitions) {
+        let state = definition.init()
+        for (const event of ordered) state = definition.apply(state, event)
+        const view = definition.view(state)
+        values[definition.key] = definition.schema.parse(view)
+      }
+      return { asOfSeq: ordered.at(-1)?.seq ?? -1, values }
+    }
     const pluginCtx = {
       tools: {
         register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } },
@@ -1416,10 +1430,19 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           imageProjectionDefinitions.push(definition)
           return () => {}
         },
+        snapshot(session) {
+          parentProjectionSnapshots += 1
+          return projectionSnapshot(session)
+        },
       },
       sessionProjectionCache: {
         cachedSnapshot: () => undefined,
-        coldSnapshot: async () => assert.fail('an empty Session list must not trigger a cold read'),
+        async coldSnapshot(id) {
+          coldProjectionSnapshots.push(id)
+          const child = batchChildren.get(id)
+          if (child === undefined) throw new Error(`session \"${id}\" not found`)
+          return projectionSnapshot(child.session)
+        },
       },
       sessionPersistence: { list: async () => [] },
       sessions: {
@@ -1464,6 +1487,8 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(typeof sessionCreated, 'function')
     assert.equal(recoveryRootSession.events.length, 0)
     assert.equal(recoveryFlushes, 0)
+    assert.equal(parentProjectionSnapshots, 0)
+    assert.deepEqual(coldProjectionSnapshots, [])
     assert.deepEqual({ requests: requests.length, jobs: jobs.length, policies: policyModels.length }, recoveryBaseline)
     const restoredNoBatch = { header: { id: 'restored-no-batch' }, events: [{ seq: 0, type: 'emate/image-output', data: { schema_version: 2 } }],
       append(type, data, options) { this.events.push({ seq: this.events.length, type, data, options }) } }
@@ -1670,7 +1695,6 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
     let batchChildOrdinal = 0
     let rejectBatchChildModelPolicy = false
-    const batchChildren = new Map()
     pluginCtx.sessions = { flush: async () => true }
     pluginCtx.emateModelPolicy = modelPolicy
     pluginCtx.subagents = {
@@ -1717,6 +1741,9 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     rejectBatchChildModelPolicy = false
     rejectModelPolicyFrom = undefined
     assert.equal(policyFailure.status, 'failed')
+    assert.equal(parentProjectionSnapshots, 1)
+    assert.deepEqual(coldProjectionSnapshots, policyFailure.tasks
+      .filter(task => task.receipt?.status === 'completed').map(task => task.child_session_id))
     assert.equal(requests.length, requestsBeforePolicyFailure)
     assert.equal(jobs.length, jobsBeforePolicyFailure)
     assert.ok(batchChildren.size >= 1, 'model-policy fixture must create at least one batch child')
