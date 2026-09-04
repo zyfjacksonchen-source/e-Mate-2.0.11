@@ -354,6 +354,8 @@ describe('file import composer lifecycle', () => {
       images={[draft]} createDraftImages={created} readAttachment={readAttachment} />)
     expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true)
     await waitFor(() => expect(created).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加本地图片或文件' }).hasAttribute('disabled')).toBe(false))
+    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false)
     expect(readAttachment).toHaveBeenCalledWith(attachment)
     expect(created.mock.calls[0]![0][0].name).toBe('picture.png')
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('正文')
@@ -376,6 +378,46 @@ describe('file import composer lifecycle', () => {
     expect(readAttachment).toHaveBeenCalledOnce()
     expect(created).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: '重试恢复 picture.png' })).toBeNull()
+  })
+
+  it('does not settle stale hydration after switching session shells', async () => {
+    const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
+    let finish!: (value: unknown) => void
+    const readAttachment = vi.fn(() => new Promise(resolve => { finish = resolve }))
+    const created = vi.fn()
+    const hydrated = vi.fn()
+    const released = vi.fn()
+    const view = render(<Composer key="one" initialImages={[draft]} readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} onRelease={released} />)
+    await waitFor(() => expect(readAttachment).toHaveBeenCalledOnce())
+    view.rerender(<Composer key="two" sessionId="two" readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} onRelease={released} />)
+    finish({ ok: true, value: { attachment, data: HYDRATED_NOTE } })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(created).not.toHaveBeenCalled()
+    expect(hydrated).not.toHaveBeenCalled()
+    expect(released).not.toHaveBeenCalled()
+  })
+
+  it('keeps controls blocked until the final concurrent hydration completes', async () => {
+    const secondAttachment = { ...attachment, attachmentId: `sha256:${'b'.repeat(64)}`, name: 'second.png' }
+    const drafts = [
+      { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment },
+      { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000002', attachment: secondAttachment },
+    ]
+    const reads = new Map<string, (value: unknown) => void>()
+    const readAttachment = vi.fn((ref: any) => new Promise(resolve => { reads.set(ref.attachmentId, resolve) }))
+    const hydrated = vi.fn()
+    const created = vi.fn((selected: readonly File[]) => [{ id: `native-${selected[0]!.name}`, file: selected[0] }])
+    render(<Composer images={drafts} readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} />)
+    await waitFor(() => expect(readAttachment).toHaveBeenCalledTimes(2))
+    reads.get(secondAttachment.attachmentId)!({ ok: true, value: { attachment: secondAttachment, data: HYDRATED_NOTE } })
+    await waitFor(() => expect(hydrated).toHaveBeenCalledWith(drafts[1]!.draft_key, 'native-second.png'))
+    expect(screen.getByRole('button', { name: '添加本地图片或文件' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true)
+    reads.get(attachment.attachmentId)!({ ok: true, value: { attachment, data: HYDRATED_NOTE } })
+    await waitFor(() => expect(hydrated).toHaveBeenCalledWith(drafts[0]!.draft_key, 'native-picture.png'))
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加本地图片或文件' }).hasAttribute('disabled')).toBe(false))
+    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false)
   })
 
   it('hydrates multiple refs once each across StrictMode rerenders', async () => {
@@ -439,12 +481,15 @@ describe('file import composer lifecycle', () => {
     const created = vi.fn((selected: readonly File[]) => [{ id: 'retry-id', file: selected[0] }])
     render(<Composer images={[draft]} readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} onRemoveImage={removed} />)
     const retry = await screen.findByRole('button', { name: '重试恢复 picture.png' })
+    expect(screen.getByRole('button', { name: '添加本地图片或文件' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true)
     expect(removed).not.toHaveBeenCalled()
     expect(readAttachment).toHaveBeenCalledOnce()
     fireEvent.click(retry)
     await waitFor(() => expect(hydrated).toHaveBeenCalledWith(draft.draft_key, 'retry-id'))
     expect(readAttachment).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('button', { name: '重试恢复 picture.png' })).toBeNull()
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加本地图片或文件' }).hasAttribute('disabled')).toBe(false))
   })
 
   it('removes a newly inadmissible persisted ref before reading it', async () => {
