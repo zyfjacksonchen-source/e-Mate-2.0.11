@@ -3,6 +3,8 @@
   "ticket": "EM217-503",
   "claim": "quality-noninferiority-blind-paired-study",
   "status": "OPEN",
+  "provenance": null,
+  "environment": null,
   "raw_evidence": {
     "uri": null,
     "sha256": null

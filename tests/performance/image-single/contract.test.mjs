@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
-  ATTACHMENT_LIMITS, CLAIM, COMPARISON_SCENARIOS, HARNESS_COMMIT, HISTORY_SCENARIO, NORMALIZED_PROMPT, REQUEST_BODY,
+  ATTACHMENT_LIMITS, CLAIM, COMPARISON_SCENARIOS, DESKTOP_REFERENCE, HARNESS_COMMIT, HISTORY_SCENARIO, NORMALIZED_PROMPT, REQUEST_BODY,
   SCENARIO_NAMES, comparisonSummary, historySummary, nearestRank, sha256,
-  createSourcePassManifest, validateAggregate, validateDirectMeasurement, validateDirectProductSource, validateManifest, validateWorkerReport,
+  createPassManifest, createSourcePassManifest, validateAggregate, validateDirectMeasurement, validateDirectProductSource,
+  validateGuiEvidence, validateManifest, validateWorkerReport,
 } from './protocol.mjs'
 import { crc32 } from 'node:zlib'
 import { assertBuiltPrerequisites, sourceSmoke } from './benchmark.mjs'
@@ -99,6 +100,20 @@ function aggregate() {
 
 function openManifest() {
   return JSON.parse(readFileSync(new URL('../../../docs/2.0.17/evidence-manifests/single-image-latency.json', import.meta.url), 'utf8'))
+}
+function guiEvidence({ commit = GIT_COMMIT, latency = 100 } = {}) {
+  const value = {
+    schema_version: 1, ticket: 'EM217-108', claim: 'macos-dev-cached-terminal-projection-first-visible-v1',
+    protocol: { clock: 'performance.now monotonic', stimulus: 'cached-local-bytes', start: 'terminal-projection-handoff',
+      end: 'first-visible-image', percentile: 'nearest-rank', minimum_samples: 100, p95_limit_ms: 500 },
+    provenance: { emate_commit: commit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: '2.0.17' },
+    environment: { class: 'macos-app-directory-dev', machine_sha256: HASH_A, app_bundle_sha256: HASH_B },
+    measured_at: '2026-09-04T00:00:00.000Z',
+    samples: Array.from({ length: 100 }, (_, index) => ({ sample: index + 1, latency_ms: latency })), p95_ms: latency,
+  }
+  const raw = JSON.stringify(value) + '\n'
+  const digest = sha256(raw)
+  return { value, raw, descriptor: { uri: `https://evidence.example/em217-108/${digest}.json`, sha256: digest } }
 }
 function rejectsMutation(mutate, pattern) {
   const value = worker()
@@ -211,7 +226,7 @@ test('direct product source rejects benchmark controls, n greater than one, and 
   assert.throws(() => validateDirectProductSource(source.replace("JSON.stringify({ model: IMAGE_MODEL, prompt: task.prompt })", "JSON.stringify({ model: IMAGE_MODEL, prompt: task.prompt, n: 2 })")), /single request body changed|n > 1/u)
 })
 
-test('OPEN manifest cannot claim results and GUI evidence stays OPEN', () => {
+test('OPEN manifest cannot claim source or GUI results', () => {
   const manifest = openManifest()
   assert.strictEqual(validateManifest(manifest), manifest)
   const missing = clone(manifest)
@@ -222,14 +237,32 @@ test('OPEN manifest cannot claim results and GUI evidence stays OPEN', () => {
   assert.throws(() => validateManifest(forged), /OPEN manifest cannot claim results/u)
   const gui = clone(manifest)
   gui.gui_first_visible.status = 'PASS'
-  assert.throws(() => validateManifest(gui), /GUI evidence must remain OPEN/u)
+  assert.throws(() => validateManifest(gui), /OPEN manifest cannot claim GUI evidence/u)
+})
+
+test('PASS is projected only from exact source and 100-sample macOS dev GUI raw bytes', () => {
+  const combined = aggregate()
+  const sourceRaw = JSON.stringify(combined) + '\n'
+  const sourceUri = `https://evidence.example/em217-108/${sha256(sourceRaw)}.json`
+  const gui = guiEvidence()
+  assert.deepEqual(validateGuiEvidence(gui.raw, gui.descriptor), gui.value)
+  const pass = createPassManifest(combined, sourceUri, sourceRaw, gui.raw, gui.descriptor.uri)
+  assert.equal(pass.status, 'PASS')
+  assert.equal(pass.gui_first_visible.sample_count, 100)
+  assert.strictEqual(validateManifest(pass, sourceRaw, gui.raw), pass)
+  assert.throws(() => validateManifest(pass, sourceRaw), /exact raw bytes/u)
+  assert.throws(() => validateManifest(pass, sourceRaw, gui.raw + ' '), /raw hash mismatch/u)
+  const slow = guiEvidence({ latency: 501 })
+  assert.throws(() => validateGuiEvidence(slow.raw, slow.descriptor), /exceeds 500/u)
+  const otherCommit = guiEvidence({ commit: 'b'.repeat(40) })
+  assert.throws(() => createPassManifest(combined, sourceUri, sourceRaw, otherCommit.raw, otherCommit.descriptor.uri), /commits differ/u)
 })
 
 
 test('SOURCE_PASS manifest is a strict projection of exact validated raw bytes', () => {
   const combined = aggregate()
   const raw = JSON.stringify(combined) + '\n'
-  const manifest = createSourcePassManifest(combined, 'https://evidence.example/em217-108/raw.json', raw)
+  const manifest = createSourcePassManifest(combined, `https://evidence.example/em217-108/${sha256(raw)}.json`, raw)
   assert.strictEqual(validateManifest(manifest, raw), manifest)
   assert.throws(() => validateManifest(manifest), /requires the exact raw aggregate bytes/u)
   const fakeCommit = clone(manifest)
@@ -237,7 +270,7 @@ test('SOURCE_PASS manifest is a strict projection of exact validated raw bytes',
   assert.throws(() => validateManifest(fakeCommit, raw), /lowercase 40-hex Git commit/u)
   const wrongHash = clone(manifest)
   wrongHash.external_raw.sha256 = HASH_A
-  assert.throws(() => validateManifest(wrongHash, raw), /raw hash mismatch/u)
+  assert.throws(() => validateManifest(wrongHash, raw), /raw.*hash/u)
   const leaked = clone(manifest)
   leaked.results.scenario_percentiles['warm-small'][0].innocent = 'private prompt or base64 payload'
   assert.throws(() => validateManifest(leaked, raw), /results do not match raw aggregate/u)

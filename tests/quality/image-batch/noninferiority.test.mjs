@@ -21,9 +21,10 @@ function sealAllocations(record) {
   record.protocol.randomization.allocation_manifest_sha256 = hex(canonicalAllocationBytes(record.pairs))
   return record
 }
-function evidence(record, uri = defaultUri) {
+function evidence(record, uri) {
   const raw = JSON.stringify(record)
-  return { raw, descriptor: { uri, sha256: hex(raw) } }
+  const sha256 = hex(raw)
+  return { raw, descriptor: { uri: uri ?? `https://evidence.invalid/immutable/${sha256}.json`, sha256 } }
 }
 function analyze(record = study()) {
   const { raw, descriptor } = evidence(record)
@@ -32,6 +33,8 @@ function analyze(record = study()) {
 function study({ count = 60, singleScore = 4, batchScore = 4 } = {}) {
   const record = {
     schema_version: 1,
+    provenance: { emate_commit: 'a'.repeat(40), harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d', desktop_reference: '6074088f5b660206e404b3591fab51fb99c69add', version: '2.0.17' },
+    environment: { layer: 'production-provider', environment_name_sha256: hex('production'), gateway_origin_sha256: hex('gateway'), deployment_fingerprint_sha256: hex('deployment') },
     protocol: {
       minimum_pairs: 50,
       maximum_pairs: 1000,
@@ -65,6 +68,7 @@ function study({ count = 60, singleScore = 4, batchScore = 4 } = {}) {
         pair_id: 'pair-' + String(pairNumber).padStart(4, '0'),
         category,
         requests: { single: { ...request }, batch: { ...request } },
+        artifacts: { A: { sha256: hex('artifact-A-' + pairNumber) }, B: { sha256: hex('artifact-B-' + pairNumber) } },
         allocation: { ...allocation, commitment_sha256: hex('allocation-' + pairNumber), assigned_before_scoring: true },
         scores: [hex('evaluator-one'), hex('evaluator-two')].flatMap(evaluator_hash => ['A', 'B'].map(side => ({
           evaluator_hash, side,
@@ -75,7 +79,7 @@ function study({ count = 60, singleScore = 4, batchScore = 4 } = {}) {
   }
   return sealAllocations(record)
 }
-function expectRejected(base, mutate, { reseal = false, uri = defaultUri } = {}) {
+function expectRejected(base, mutate, { reseal = false, uri } = {}) {
   const value = clone(base)
   mutate(value)
   if (reseal) sealAllocations(value)
@@ -201,7 +205,8 @@ test('tracked manifest stays sanitized OPEN/null and only revalidated raw bytes 
 
   const encoded = evidence(study())
   const future = projectManifest(manifest, encoded.raw, encoded.descriptor)
-  assert.equal(validateManifest(future).release_gate, 'PASS')
+  assert.equal(validateManifest(future, encoded.raw).release_gate, 'PASS')
+  assert.throws(() => validateManifest(future), /exact raw evidence bytes/u)
   assert.throws(() => projectManifest(manifest, encoded.raw + '\n', encoded.descriptor))
 })
 
@@ -230,5 +235,5 @@ test('manifest rejects partial OPEN and incomplete or threshold-missing PASS pro
     value => { value.result.protocol_checks.randomized_concealed_balanced_order = false },
     value => { value.result.protocol_checks.matched_blind_evaluators = false },
     value => { value.result.protocol_checks.scores_complete_and_finite = false },
-  ]) { const value = clone(complete); mutate(value); assert.throws(() => validateManifest(value)) }
+  ]) { const value = clone(complete); mutate(value); assert.throws(() => validateManifest(value, encoded.raw)) }
 })

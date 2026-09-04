@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 export const SCHEMA_VERSION = 1
 export const TICKET = 'EM217-108'
 export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
+export const DESKTOP_REFERENCE = '6074088f5b660206e404b3591fab51fb99c69add'
 export const MODEL = 'gpt-image-2-pro'
 export const FAKE_DELAY_MS = 25
 export const REPETITIONS = 3
@@ -79,6 +80,25 @@ function exactKeys(value, keys, label) {
 function gitCommit(value, label) { expect(typeof value === 'string' && /^[0-9a-f]{40}$/u.test(value), label + ' must be a lowercase 40-hex Git commit'); return value }
 function hash(value, label) { expect(typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value), label + ' must be lowercase SHA-256'); return value }
 function sameNumber(actual, expected, label) { expect(Object.is(actual, expected), label + ' arithmetic mismatch') }
+
+function evidenceDescriptor(uri, digest, label) {
+  hash(digest, label + ' hash')
+  let value
+  try { value = new URL(uri) } catch { fail(label + ' URI is invalid') }
+  expect(value.protocol === 'https:' && value.hostname && value.pathname.length > 1, label + ' requires immutable HTTPS')
+  expect(!value.username && !value.password && !value.search && !value.hash, label + ' URI cannot contain credentials, query, or fragment')
+  expect(value.pathname.includes(digest), label + ' URI path must contain the exact raw hash')
+}
+
+function exactRaw(raw, expectedHash, label) {
+  expect(typeof raw === 'string' || raw instanceof Uint8Array, label + ' requires exact raw bytes')
+  const bytes = typeof raw === 'string' ? Buffer.from(raw) : Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength)
+  expect(bytes.byteLength > 0 && bytes.byteLength <= 4 * 1024 * 1024, label + ' raw bytes exceed 4 MiB')
+  expect(sha256(bytes) === expectedHash, label + ' raw hash mismatch')
+  let text
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { fail(label + ' raw bytes must be UTF-8') }
+  try { return JSON.parse(text) } catch { fail(label + ' raw bytes must be JSON') }
+}
 
 const LOWER_STAGE_KEYS = ['provider_submit_ms', 'provider_finish_ms', 'response_complete_ms', 'cas_begin_ms', 'cas_end_ms']
 const ASSEMBLED_STAGE_KEYS = [...LOWER_STAGE_KEYS, 'verification_begin_ms', 'verification_end_ms', 'job_terminal_ms', 'receipt_append_begin_ms', 'projection_handoff_ms', 'receipt_append_return_ms', 'tool_return_ms']
@@ -363,40 +383,84 @@ export function createSourcePassManifest(aggregate, externalUri, rawAggregate) {
     provenance: projected.provenance,
     results: projected.results,
     external_raw: { uri: externalUri, sha256: sha256(raw) },
-    gui_first_visible: { status: 'OPEN', p95_limit_ms: 500, p95_ms: null, evidence_uri: null, sha256: null },
+    gui_first_visible: { status: 'OPEN', environment: null, p95_limit_ms: 500, p95_ms: null, sample_count: null, evidence_uri: null, sha256: null },
   }
   validateManifest(manifest, raw)
   return manifest
 }
 
-export function validateManifest(manifest, rawAggregate) {
+export function validateGuiEvidence(rawGui, descriptor) {
+  evidenceDescriptor(descriptor.uri, descriptor.sha256, 'GUI evidence')
+  const value = exactRaw(rawGui, descriptor.sha256, 'GUI evidence')
+  exactKeys(value, ['schema_version', 'ticket', 'claim', 'protocol', 'provenance', 'environment', 'measured_at', 'samples', 'p95_ms'], 'GUI evidence')
+  expect(value.schema_version === 1 && value.ticket === TICKET && value.claim === 'macos-dev-cached-terminal-projection-first-visible-v1', 'GUI evidence identity')
+  expect(JSON.stringify(value.protocol) === JSON.stringify({ clock: 'performance.now monotonic', stimulus: 'cached-local-bytes', start: 'terminal-projection-handoff', end: 'first-visible-image', percentile: 'nearest-rank', minimum_samples: 100, p95_limit_ms: 500 }), 'GUI evidence protocol')
+  exactKeys(value.provenance, ['emate_commit', 'harness_commit', 'desktop_reference', 'version'], 'GUI evidence provenance')
+  gitCommit(value.provenance.emate_commit, 'GUI evidence provenance commit')
+  expect(value.provenance.harness_commit === HARNESS_COMMIT && value.provenance.desktop_reference === DESKTOP_REFERENCE && value.provenance.version === '2.0.17', 'GUI evidence provenance mismatch')
+  exactKeys(value.environment, ['class', 'machine_sha256', 'app_bundle_sha256'], 'GUI evidence environment')
+  expect(value.environment.class === 'macos-app-directory-dev', 'GUI evidence must remain macOS app-directory/dev')
+  hash(value.environment.machine_sha256, 'GUI evidence machine hash'); hash(value.environment.app_bundle_sha256, 'GUI evidence app bundle hash')
+  expect(typeof value.measured_at === 'string' && Number.isFinite(Date.parse(value.measured_at)), 'GUI evidence timestamp')
+  expect(Array.isArray(value.samples) && value.samples.length >= 100 && value.samples.length <= 10_000, 'GUI evidence requires 100..10000 samples')
+  const ids = new Set()
+  for (const sample of value.samples) {
+    exactKeys(sample, ['sample', 'latency_ms'], 'GUI sample')
+    integer(sample.sample, 'GUI sample index', 1); expect(!ids.has(sample.sample), 'GUI sample IDs must be unique'); ids.add(sample.sample)
+    finite(sample.latency_ms, 'GUI sample latency')
+  }
+  sameNumber(value.p95_ms, nearestRank(value.samples.map(sample => sample.latency_ms), 0.95), 'GUI p95')
+  expect(value.p95_ms <= 500, 'GUI first-visible p95 exceeds 500 ms')
+  rejectSensitiveKeys(value)
+  return value
+}
+
+export function createPassManifest(aggregate, sourceUri, rawAggregate, rawGui, guiUri) {
+  const manifest = createSourcePassManifest(aggregate, sourceUri, rawAggregate)
+  const guiDescriptor = { uri: guiUri, sha256: sha256(typeof rawGui === 'string' ? Buffer.from(rawGui) : rawGui) }
+  const gui = validateGuiEvidence(rawGui, guiDescriptor)
+  expect(gui.provenance.emate_commit === manifest.provenance.emate_commit, 'GUI and source evidence commits differ')
+  manifest.status = 'PASS'
+  manifest.gui_first_visible = { status: 'PASS', environment: gui.environment, p95_limit_ms: 500, p95_ms: gui.p95_ms,
+    sample_count: gui.samples.length, evidence_uri: guiUri, sha256: guiDescriptor.sha256 }
+  validateManifest(manifest, rawAggregate, rawGui)
+  return manifest
+}
+
+export function validateManifest(manifest, rawAggregate, rawGui) {
   exactKeys(manifest, ['schema_version', 'ticket', 'status', 'contract', 'claim', 'protocol', 'provenance', 'results', 'external_raw', 'gui_first_visible'], 'manifest')
   expect(manifest.schema_version === 1 && manifest.ticket === TICKET && manifest.claim === CLAIM, 'manifest identity')
   expect(manifest.contract === 'docs/2.0.17/contracts/single-image-latency.md', 'manifest contract path')
-  expect(manifest.status === 'OPEN' || manifest.status === 'SOURCE_PASS', 'manifest status')
+  expect(['OPEN', 'SOURCE_PASS', 'PASS'].includes(manifest.status), 'manifest status')
   expect(JSON.stringify(manifest.protocol) === JSON.stringify({ fake_delay_ms: 25, fresh_processes: 3, percentile: 'nearest-rank-per-repetition', all_repetitions_must_pass: true }), 'manifest protocol')
   exactKeys(manifest.external_raw, ['uri', 'sha256'], 'manifest.external_raw')
-  exactKeys(manifest.gui_first_visible, ['status', 'p95_limit_ms', 'p95_ms', 'evidence_uri', 'sha256'], 'manifest.gui_first_visible')
-  expect(manifest.gui_first_visible.status === 'OPEN' && manifest.gui_first_visible.p95_limit_ms === 500 && manifest.gui_first_visible.p95_ms === null && manifest.gui_first_visible.evidence_uri === null && manifest.gui_first_visible.sha256 === null, 'GUI evidence must remain OPEN')
+  exactKeys(manifest.gui_first_visible, ['status', 'environment', 'p95_limit_ms', 'p95_ms', 'sample_count', 'evidence_uri', 'sha256'], 'manifest.gui_first_visible')
+  const guiOpen = { status: 'OPEN', environment: null, p95_limit_ms: 500, p95_ms: null, sample_count: null, evidence_uri: null, sha256: null }
   if (manifest.status === 'OPEN') {
     expect(manifest.provenance === null && manifest.results === null, 'OPEN manifest cannot claim results')
     expect(manifest.external_raw.uri === null && manifest.external_raw.sha256 === null, 'OPEN manifest cannot claim raw evidence')
+    expect(JSON.stringify(manifest.gui_first_visible) === JSON.stringify(guiOpen), 'OPEN manifest cannot claim GUI evidence')
   } else {
     record(manifest.provenance, 'manifest.provenance')
     gitCommit(manifest.provenance.emate_commit, 'manifest.provenance.emate_commit')
     expect(manifest.provenance.harness_commit === HARNESS_COMMIT, 'manifest Harness commit')
-    expect(typeof manifest.external_raw.uri === 'string' && /^(?:https|s3|r2):\/\//u.test(manifest.external_raw.uri), 'manifest external raw URI')
-    hash(manifest.external_raw.sha256, 'manifest external raw hash')
+    evidenceDescriptor(manifest.external_raw.uri, manifest.external_raw.sha256, 'manifest external raw')
     expect(typeof rawAggregate === 'string' || rawAggregate instanceof Uint8Array, 'SOURCE_PASS manifest requires the exact raw aggregate bytes')
-    const raw = typeof rawAggregate === 'string' ? Buffer.from(rawAggregate) : Buffer.from(rawAggregate)
-    expect(sha256(raw) === manifest.external_raw.sha256, 'manifest external raw hash mismatch')
-    let aggregate
-    try { aggregate = JSON.parse(raw.toString('utf8')) } catch { fail('manifest raw aggregate is invalid JSON') }
+    const aggregate = exactRaw(rawAggregate, manifest.external_raw.sha256, 'manifest external')
     validateAggregate(aggregate)
     expect(aggregate.all_repetitions_pass === true, 'manifest raw aggregate did not pass every repetition')
     const expected = aggregateManifestProjection(aggregate)
     expect(JSON.stringify(manifest.provenance) === JSON.stringify(expected.provenance), 'manifest provenance does not match raw aggregate')
     expect(JSON.stringify(manifest.results) === JSON.stringify(expected.results), 'manifest results do not match raw aggregate')
+    if (manifest.status === 'SOURCE_PASS') expect(JSON.stringify(manifest.gui_first_visible) === JSON.stringify(guiOpen), 'SOURCE_PASS cannot claim GUI evidence')
+    else {
+      expect(manifest.gui_first_visible.status === 'PASS' && manifest.gui_first_visible.p95_limit_ms === 500, 'PASS requires GUI evidence')
+      const descriptor = { uri: manifest.gui_first_visible.evidence_uri, sha256: manifest.gui_first_visible.sha256 }
+      const gui = validateGuiEvidence(rawGui, descriptor)
+      expect(gui.provenance.emate_commit === manifest.provenance.emate_commit, 'GUI and source evidence commits differ')
+      expect(JSON.stringify(manifest.gui_first_visible) === JSON.stringify({ status: 'PASS', environment: gui.environment, p95_limit_ms: 500,
+        p95_ms: gui.p95_ms, sample_count: gui.samples.length, evidence_uri: descriptor.uri, sha256: descriptor.sha256 }), 'manifest GUI projection mismatch')
+    }
   }
   rejectSensitiveKeys(manifest)
   return manifest

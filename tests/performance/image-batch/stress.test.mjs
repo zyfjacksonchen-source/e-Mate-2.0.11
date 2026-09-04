@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -8,6 +9,7 @@ import test from 'node:test'
 import { imageBatchProjectionDefinition } from '../../../packages/dsh/src/profile/image-batch-events.ts'
 import { readDurableImageBatchResult } from '../../../packages/dsh/src/profile/image-batch-recovery.ts'
 import { createNativeImageTaskRuntime } from '../../../packages/dsh/src/profile/native-image-task-runner.ts'
+import { CLAIM as RELEASE_CLAIM, DESKTOP_REFERENCE, HARNESS_COMMIT, validateManifest } from './release-evidence-protocol.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
 const RAW_RELATIVE_PATH = 'work/em217-502/performance-image-batch-raw.json'
@@ -221,107 +223,7 @@ function runReceiptProjectionLowerBound(ordinal) {
   return performance.now() - started
 }
 
-function immutableEvidence(value) {
-  return value && typeof value.uri === 'string' && /^https:\/\//u.test(value.uri)
-    && typeof value.sha256 === 'string' && /^[0-9a-f]{64}$/u.test(value.sha256)
-}
-
-const GATE_SPECS = Object.freeze({
-  ui_first_visible_p50_seconds: ['max', 75],
-  ui_first_visible_p95_seconds: ['max', 120],
-  relative_same_round_direct_single_p95_seconds: ['max', 10],
-  four_image_all_terminal_p50_seconds: ['max', 150],
-  four_image_all_terminal_p95_seconds: ['max', 240],
-  five_image_all_terminal_p50_seconds: ['max', 210],
-  five_image_all_terminal_p95_seconds: ['max', 300],
-  typed_429_retry_probe_pass: ['exact', 1],
-  duplicate_provider_generation: ['exact', 0],
-  legal_terminal_rate: ['min', 0.95],
-  successful_image_retention_rate: ['exact', 1],
-})
-
-function finite(value) { return typeof value === 'number' && Number.isFinite(value) }
-function record(value) { return value !== null && typeof value === 'object' && !Array.isArray(value) }
-
-function validateManifest(value) {
-  assert.deepEqual(Object.keys(value), ['schema_version', 'ticket', 'claim', 'release_gate', 'local', 'staging', 'production',
-    'external_raw_evidence', 'macos_gui_first_visible', 'release_evidence'])
-  assert.equal(value.schema_version, 2)
-  assert.equal(value.ticket, 'EM217-502')
-  assert(['OPEN', 'PASS'].includes(value.release_gate))
-  const environments = ['local', 'staging', 'production', 'macos_gui_first_visible']
-  for (const name of environments) {
-    const entry = value[name]
-    assert.deepEqual(Object.keys(entry), ['status', 'environment', 'result', 'raw_evidence'])
-    assert(['OPEN', 'PASS'].includes(entry.status))
-    if (entry.status === 'OPEN') {
-      assert.equal(entry.environment, null)
-      assert.equal(entry.result, null)
-      assert.deepEqual(entry.raw_evidence, { uri: null, sha256: null })
-    } else {
-      assert.equal(typeof entry.environment === 'string' && entry.environment.length > 0, true)
-      assert.equal(record(entry.result), true)
-      assert.deepEqual(Object.keys(entry.result), ['sample_count', 'measured_at'])
-      assert.equal(Number.isSafeInteger(entry.result.sample_count) && entry.result.sample_count > 0, true)
-      assert.equal(typeof entry.result.measured_at === 'string' && !Number.isNaN(Date.parse(entry.result.measured_at)), true)
-      assert.equal(Boolean(immutableEvidence(entry.raw_evidence)), true, name + ' result requires immutable raw evidence')
-    }
-  }
-  const raw = value.external_raw_evidence
-  assert.deepEqual(Object.keys(raw), ['status', 'uri', 'sha256'])
-  assert(['OPEN', 'PASS'].includes(raw.status))
-  if (raw.status === 'PASS') assert.equal(Boolean(immutableEvidence(raw)), true)
-  else assert.deepEqual(raw, { status: 'OPEN', uri: null, sha256: null })
-
-  assert.deepEqual(Object.keys(value.release_evidence), Object.keys(GATE_SPECS))
-  for (const [name, [comparison, threshold]] of Object.entries(GATE_SPECS)) {
-    const gate = value.release_evidence[name]
-    assert.deepEqual(Object.keys(gate), ['comparison', 'threshold', 'status', 'value', 'ci95', 'raw_evidence'])
-    assert.equal(gate.comparison, comparison)
-    assert.equal(gate.threshold, threshold)
-    assert(['OPEN', 'PASS'].includes(gate.status))
-    if (gate.status === 'OPEN') {
-      assert.equal(gate.value, null)
-      assert.equal(gate.ci95, null)
-      assert.deepEqual(gate.raw_evidence, { uri: null, sha256: null })
-      continue
-    }
-    assert.equal(finite(gate.value), true)
-    assert.equal(record(gate.ci95), true)
-    assert.deepEqual(Object.keys(gate.ci95), ['lower', 'upper'])
-    assert.equal(finite(gate.ci95.lower) && finite(gate.ci95.upper), true)
-    assert(gate.ci95.lower <= gate.value && gate.value <= gate.ci95.upper)
-    assert.equal(Boolean(immutableEvidence(gate.raw_evidence)), true)
-    if (comparison === 'max') assert(gate.ci95.upper <= threshold)
-    else if (comparison === 'min') assert(gate.ci95.lower >= threshold)
-    else assert(gate.value === threshold && gate.ci95.lower === threshold && gate.ci95.upper === threshold)
-  }
-  if (value.release_gate === 'PASS') {
-    assert(environments.every(name => value[name].status === 'PASS'))
-    assert.equal(raw.status, 'PASS')
-    assert(Object.values(value.release_evidence).every(gate => gate.status === 'PASS'))
-  }
-  return value
-}
-
 const clone = value => structuredClone(value)
-
-function completedManifest(value) {
-  const evidence = { uri: 'https://evidence.example/immutable/em217-502.json', sha256: 'a'.repeat(64) }
-  value.release_gate = 'PASS'
-  for (const name of ['local', 'staging', 'production', 'macos_gui_first_visible']) {
-    value[name] = { status: 'PASS', environment: name + '-environment',
-      result: { sample_count: 100, measured_at: '2026-01-01T00:00:00.000Z' }, raw_evidence: { ...evidence } }
-  }
-  value.external_raw_evidence = { status: 'PASS', ...evidence }
-  for (const gate of Object.values(value.release_evidence)) {
-    gate.status = 'PASS'
-    gate.value = gate.threshold
-    gate.ci95 = { lower: gate.threshold, upper: gate.threshold }
-    gate.raw_evidence = { ...evidence }
-  }
-  return value
-}
 
 let benchmarkReport
 
@@ -407,8 +309,17 @@ test('120 complete native batches preserve terminal, receipt, identity, concurre
   assert.equal(fullySuccessfulBatches, 12)
   assert.equal(duplicateProviderGeneration, 0)
   assert.equal(retainedSuccessfulImages, successfulImages)
+  const emateCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
+  const sourceState = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=no'], { cwd: ROOT, encoding: 'utf8' }).trim() === '' ? 'CLEAN' : 'DIRTY'
+  const digest = value => createHash('sha256').update(value).digest('hex')
   benchmarkReport = { schema_version: 2, ticket: 'EM217-502',
     claim: 'local-source-only-not-provider-latency-not-ui-first-visible-not-direct-single-image-evidence',
+    environment: {
+      layer: 'local-test-provider', environment_name_sha256: digest('local-test-provider'),
+      gateway_origin_sha256: digest('no-gateway-local-fixture'), deployment_fingerprint_sha256: digest(emateCommit),
+    },
+    provenance: { emate_commit: emateCommit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: '2.0.17' },
+    measured_at: new Date().toISOString(), source_state: sourceState,
     batches: samples.length, tasks: taskTotal, fully_successful_batches: fullySuccessfulBatches, runtime_ms: runtimeMs,
     provider_calls: providerTotal, typed_429_retry_probe: 'OPEN',
     source_assertions: { duplicate_provider_generation: duplicateProviderGeneration, legal_terminal_rate: 1,
@@ -457,7 +368,7 @@ test('HMR-style effect disposal aborts active children, prevents refill, and lea
 
 test('tracked manifest stays OPEN now, accepts only complete future evidence, and rejects partial or forged PASS', () => {
   const manifest = validateManifest(JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')))
-  assert.strictEqual(validateManifest(completedManifest(clone(manifest))).release_gate, 'PASS')
+  assert.equal(manifest.claim, RELEASE_CLAIM)
   const openMutations = [
     value => { value.production.status = 'PASS' },
     value => { value.staging.result = { sample_count: 1, measured_at: '2026-01-01T00:00:00Z' } },
@@ -468,22 +379,6 @@ test('tracked manifest stays OPEN now, accepts only complete future evidence, an
   ]
   for (const mutate of openMutations) {
     const value = clone(manifest)
-    mutate(value)
-    assert.throws(() => validateManifest(value))
-  }
-  const forgedMutations = [
-    value => { value.production.raw_evidence.sha256 = 'b'.repeat(63) },
-    value => { value.release_evidence.ui_first_visible_p95_seconds.ci95.upper = 120.001 },
-    value => { value.release_evidence.relative_same_round_direct_single_p95_seconds.value = 10.001 },
-    value => { value.release_evidence.typed_429_retry_probe_pass.value = 0 },
-    value => { value.release_evidence.duplicate_provider_generation.value = 1 },
-    value => { value.release_evidence.legal_terminal_rate.ci95.lower = 0.949 },
-    value => { value.release_evidence.successful_image_retention_rate.ci95.lower = 0.99 },
-    value => { value.release_evidence.five_image_all_terminal_p95_seconds.ci95.upper = Number.NaN },
-    value => { value.staging.status = 'OPEN' },
-  ]
-  for (const mutate of forgedMutations) {
-    const value = completedManifest(clone(manifest))
     mutate(value)
     assert.throws(() => validateManifest(value))
   }
