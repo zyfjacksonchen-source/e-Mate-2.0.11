@@ -141,7 +141,7 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
       <button type="button" disabled={sourceReason !== undefined || preparing} onClick={prepare}>
         {preparing ? '正在准备…' : '准备重新生成此项'}
       </button>
-      {(sourceReason ?? retryMessage) !== undefined && <p>{sourceReason ?? retryMessage}</p>
+      {(sourceReason ?? retryMessage) !== undefined && <p>{sourceReason ?? retryMessage}</p>}
     </div>}
   </article>
 })
