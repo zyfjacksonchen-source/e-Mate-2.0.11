@@ -21,7 +21,8 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "node --test test/*.test.mjs",
-    "check": "pnpm build && pnpm test"
+    "test:client": "cd ../../upstream/deepseek-harness && node_modules/.bin/vitest run --root ../.. --config packages/dsh/profile/plugins/emate-shell/vitest.config.ts packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx",
+    "check": "pnpm build && pnpm test && pnpm test:client"
   },
   "dsh": {
     "bundle": {

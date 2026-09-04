@@ -2,6 +2,20 @@ export const CHANNEL = '/emate.fileImport'
 export const MAX_FILES = 8
 export const MAX_FILE_BYTES = 16 * 1024 * 1024
 export const MAX_TOTAL_BYTES = 32 * 1024 * 1024
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+export const MAX_IMAGES = 20
+export const MAX_IMAGE_TOTAL_BYTES = 100 * 1024 * 1024
+export const MAX_IMAGE_PIXELS = 40_000_000
+export const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+
+export interface ImageAttachmentRef {
+  readonly attachmentId: string
+  readonly mediaType: typeof IMAGE_MEDIA_TYPES[number]
+  readonly bytes: number
+  readonly width: number
+  readonly height: number
+  readonly name?: string
+}
 export const COMPOSER_DROP_TARGET = '[data-composer-card]'
 export const WORKSPACE_DROP_TARGET = '[data-dsh-workspace-drop-target]'
 

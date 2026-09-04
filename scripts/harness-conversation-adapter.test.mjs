@@ -15,7 +15,7 @@ const section = (start, end) => adapted.slice(adapted.indexOf(start), adapted.in
 const owners = new Function('_deepseek_ai_dsh_client_runtime_client', [
   section('function emateDraftFiles(', '\t\t//#endregion'),
   section('\t\t//#region lib/types/client/queue/store.js', '\t\t//#region ../../../vendor/cosmokit/src/misc.ts'),
-  'return { SessionInputShell, InputHub, createChatStore, emateImportedText, emateFileDisplay, emateQueuePreview }',
+  'return { SessionInputShell, InputHub, createChatStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview }',
 ].join('\n'))({
   defineStore: value => value,
   createSnapshotStore(initial) {
@@ -27,15 +27,20 @@ const owners = new Function('_deepseek_ai_dsh_client_runtime_client', [
 const file = (stored = '报告_带空格_验证.txt', display = '报告 带空格@验证.txt') => ({
   stored_name: stored, display_name: display, media_type: 'text/plain', relative_path: '.e-mate/imports/' + stored,
 })
+const imageRef = (bytes = 1, digit = 'a') => ({
+  attachmentId: `sha256:${digit.repeat(64)}`, mediaType: 'image/png', bytes, width: 1, height: 1, name: '像素.png',
+})
+const draftImage = (key = '00000000-0000-4000-8000-000000000001', attachment = imageRef()) => ({ schema_version: 1, draft_key: key, attachment })
 function setup(sendSession = async () => {}) {
-  const conversation = { sendSession, releaseDraftImage() {} }
+  const released = []
+  const conversation = { sendSession, releaseDraftImage(id) { released.push(id) } }
   const hub = new owners.InputHub({ get: name => name === 'conversation' ? conversation : undefined }, value => value)
   const session = { sessionId: 'one' }
   const shell = new owners.SessionInputShell({
     actx: {}, defaultSink: (text, ids, mode, mentions) => hub.sink(session, text, ids, mode, mentions),
   })
   hub.shells.set('one', shell)
-  return { shell, hub }
+  return { shell, hub, released }
 }
 
 test('every pinned seam fails closed on missing, duplicate or already adapted input', () => {
@@ -43,7 +48,13 @@ test('every pinned seam fails closed on missing, duplicate or already adapted in
   assert.throws(() => adaptHarnessConversationSource(native + native), /found 2/u)
   assert.throws(() => adaptHarnessConversationSource(adapted), /expected one rc\.7 seam/u)
   assert.match(adapted, /const empty = .*input\?\.fileRefs.length/u)
-  assert.match(adapted, /inputActions.restoreDraft\(storedDraft, storedFiles \?\? \[\]\)/u)
+  assert.match(adapted, /inputActions.restoreDraft\(storedDraft, storedFiles \?\? \[\], storedImages \?\? \[\]\)/u)
+  assert.match(adapted, /const storedImages = useStore\(\(s\) => s\.imageRefs\)/u)
+  assert.match(adapted, /inputState\.fileRefs\.length === 0 && inputState\.imageRefs\.length === 0/u)
+  assert.match(adapted, /const durableImages = shell\?\.commitSend\(imageIds, files\) \?\? \[\]/u)
+  assert.match(adapted, /shell\?\.restoreImages\(imageIds, durableImages\)/u)
+  assert.match(adapted, /this\.durableImages\.flatMap\(item =>/u)
+  assert.match(adapted, /write\(this\.snapshot\.draft, this\.fileRefs, this\.durableImages\)/u)
   assert.throws(() => adaptHarnessConversationSource(native.replace('}, InputBar);', '}, ChangedInputBar);')), /apply\/composer-body: expected one rc\.7 seam/u)
   assert.match(adapted, /"e-mate\.conversation\.composer": \{ kind: "single", scope: "session-maybe" \}/u)
 })
@@ -71,6 +82,143 @@ test('native scoped chat store persists one file list, cold restores names, and 
   assert.match(damaged.notices.getSnapshot().text, /附件草稿无法恢复/u)
 })
 
+test('mirror bind repairs corrupt persisted images once and adopts sanitized current state', () => {
+  const store = owners.createChatStore()
+  const persisted = store.init()
+  const validFile = file()
+  store.actions.setDraft(persisted, '正文保留', [validFile], [{ ...draftImage(), attachment: { ...imageRef(), bytes: 0 } }])
+
+  const first = setup().shell
+  first.restoreDraft(persisted.draft, persisted.fileRefs, persisted.imageRefs)
+  assert.match(first.notices.getSnapshot().text, /图片草稿无法恢复/u)
+  const unbind = first.bindMirror((text, files, images) => store.actions.setDraft(persisted, text, files, images))
+  assert.equal(persisted.draft, '正文保留')
+  assert.deepEqual(persisted.fileRefs, [validFile])
+  assert.deepEqual(persisted.imageRefs, [])
+  unbind()
+
+  const second = setup().shell
+  second.restoreDraft(persisted.draft, persisted.fileRefs, persisted.imageRefs)
+  second.bindMirror((text, files, images) => store.actions.setDraft(persisted, text, files, images))
+  assert.equal(second.notices.getSnapshot(), null)
+  assert.equal(second.snapshot.draft, '正文保留')
+  assert.deepEqual(second.snapshot.fileRefs, [validFile])
+  assert.deepEqual(second.snapshot.imageRefs, [])
+
+  const validPersisted = store.init()
+  store.actions.setDraft(validPersisted, '冷恢复', [validFile], [draftImage()])
+  const valid = setup().shell
+  valid.restoreDraft(validPersisted.draft, validPersisted.fileRefs, validPersisted.imageRefs)
+  valid.hydrateDurableImage(draftImage().draft_key, 'fresh-runtime-id')
+  valid.bindMirror((text, files, images) => store.actions.setDraft(validPersisted, text, files, images))
+  assert.deepEqual(validPersisted.imageRefs, [draftImage()])
+  assert.doesNotMatch(JSON.stringify(validPersisted), /fresh-runtime-id|blob:|base64|previewUrl/u)
+})
+
+test('durable image metadata persists without runtime ids and cold hydration creates fresh ordered ids', () => {
+  const store = owners.createChatStore()
+  const persisted = store.init()
+  const first = setup().shell
+  first.bindMirror((text, files, images) => store.actions.setDraft(persisted, text, files, images))
+  const firstDraft = draftImage()
+  const secondDraft = draftImage('00000000-0000-4000-8000-000000000002', imageRef(2, 'b'))
+  assert.equal(first.addDurableImages([firstDraft, secondDraft], ['runtime-old-a', 'runtime-old-b']), true)
+  assert.deepEqual(persisted.imageRefs, [firstDraft, secondDraft])
+  assert.deepEqual(Object.keys(persisted.imageRefs[0]).sort(), ['attachment', 'draft_key', 'schema_version'])
+  const persistedJson = JSON.stringify(persisted)
+  assert.match(persistedJson, /sha256:[a-f0-9]{64}/u)
+  assert.doesNotMatch(persistedJson, /runtime-old|blob:|base64|data:|previewUrl|arrayBuffer|lastModified/u)
+
+  const cold = setup().shell
+  cold.restoreDraft('正文', [file()], JSON.parse(JSON.stringify(persisted.imageRefs)))
+  assert.deepEqual(cold.snapshot.imageIds, [])
+  assert.deepEqual(cold.snapshot.hydratedImageKeys, [])
+  cold.submit()
+  const notice = cold.notices.getSnapshot()
+  cold.submit()
+  assert.equal(cold.notices.getSnapshot().seq, notice.seq)
+  assert.match(notice.text, /正在恢复/u)
+  assert.equal(cold.hydrateDurableImage(secondDraft.draft_key, 'runtime-new-b'), true)
+  assert.deepEqual(cold.snapshot.imageIds, ['runtime-new-b'])
+  assert.equal(cold.hydrateDurableImage(firstDraft.draft_key, 'runtime-new-a'), true)
+  assert.deepEqual(cold.snapshot.imageIds, ['runtime-new-a', 'runtime-new-b'])
+  assert.deepEqual(cold.snapshot.hydratedImageKeys, [firstDraft.draft_key, secondDraft.draft_key])
+  assert.deepEqual(cold.snapshot.imageRefs, [firstDraft, secondDraft])
+})
+
+test('durable image parser preserves valid text and files while rejecting duplicates and exact hard-limit overflow', () => {
+  const shell = setup().shell
+  shell.restoreDraft('正文保留', [file()], [{ ...draftImage(), attachment: { ...imageRef(), bytes: 0 } }])
+  assert.equal(shell.snapshot.draft, '正文保留')
+  assert.equal(shell.snapshot.fileRefs.length, 1)
+  assert.deepEqual(shell.snapshot.imageRefs, [])
+  assert.match(shell.notices.getSnapshot().text, /图片草稿无法恢复/u)
+  assert.throws(() => owners.emateDraftImages([draftImage(), draftImage()]), /图片草稿无效/u)
+  for (const attachment of [
+    { ...imageRef(), width: 40_000_001 }, { ...imageRef(), width: 10_000, height: 4_001 },
+    { ...imageRef(), name: '.' }, { ...imageRef(), name: 'e\u0301.png' }, { ...imageRef(), name: `${'界'.repeat(84)}.png` },
+  ]) assert.throws(() => owners.emateDraftImages([draftImage(undefined, attachment)]), /图片草稿无效/u)
+  assert.equal(owners.emateDraftImages([draftImage('00000000-0000-4000-8000-000000000001', imageRef(5 * 1024 * 1024))])[0].attachment.bytes, 5 * 1024 * 1024)
+  assert.throws(() => owners.emateDraftImages([draftImage('00000000-0000-4000-8000-000000000001', imageRef(5 * 1024 * 1024 + 1))]), /图片草稿无效/u)
+  const twenty = Array.from({ length: 20 }, (_, index) => draftImage(`00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, imageRef(5 * 1024 * 1024, index % 2 ? 'a' : 'b')))
+  assert.equal(owners.emateDraftImages(twenty).length, 20)
+  assert.throws(() => owners.emateDraftImages([...twenty, draftImage('00000000-0000-4000-8000-000000000020')]), /图片草稿无效/u)
+})
+
+test('removing durable images clears associations and mirrors refs but no native ids', () => {
+  const store = owners.createChatStore()
+  const persisted = store.init()
+  const shell = setup().shell
+  shell.bindMirror((text, files, images) => store.actions.setDraft(persisted, text, files, images))
+  shell.addImages(['runtime-only'])
+  shell.addDurableImages([draftImage()], ['runtime-durable'])
+  shell.removeImage('runtime-durable')
+  assert.deepEqual(shell.snapshot.imageIds, ['runtime-only'])
+  assert.deepEqual(shell.snapshot.imageRefs, [])
+  assert.deepEqual(persisted.imageRefs, [])
+  assert.deepEqual(shell.snapshot.runtimeOnlyImageIds, ['runtime-only'])
+  assert.doesNotMatch(JSON.stringify(persisted), /runtime-only|runtime-durable/u)
+})
+
+test('runtime image-stage reservation blocks submit and clears on failure or association', () => {
+  const sent = []
+  const store = owners.createChatStore()
+  const persisted = store.init()
+  const { shell } = setup(async (...args) => { sent.push(args) })
+  shell.bindMirror((text, files, images) => store.actions.setDraft(persisted, text, files, images))
+  shell.setDraft('待发送')
+  assert.equal(shell.actions.beginImageStage(), true)
+  assert.equal(shell.snapshot.imageStagePending, true)
+  assert.doesNotMatch(JSON.stringify(persisted), /imageStagePending|runtime-only/u)
+  shell.actions.submit()
+  shell.submit('steer')
+  assert.deepEqual(sent, [])
+  shell.actions.cancelImageStage()
+  assert.equal(shell.snapshot.imageStagePending, false)
+  shell.submit()
+  assert.equal(sent.length, 1)
+
+  const successful = setup(async (...args) => { sent.push(args) }).shell
+  successful.setDraft('带图')
+  assert.equal(successful.actions.beginImageStage(), true)
+  assert.equal(successful.actions.addDurableImages([draftImage()], ['staged-id']), true)
+  assert.equal(successful.snapshot.imageStagePending, false)
+  successful.actions.submit()
+  assert.equal(sent.at(-1)[2][0], 'staged-id')
+})
+
+test('native registry pruning retains refs but makes the missing association pending', () => {
+  const shell = setup().shell
+  const drafts = [draftImage(), draftImage('00000000-0000-4000-8000-000000000002', imageRef(2, 'b'))]
+  shell.addDurableImages(drafts, ['id-a', 'id-b'])
+  shell.pruneImages(['id-b'])
+  assert.deepEqual(shell.snapshot.imageRefs, drafts)
+  assert.deepEqual(shell.snapshot.imageIds, ['id-b'])
+  assert.deepEqual(shell.snapshot.hydratedImageKeys, [drafts[1].draft_key])
+  shell.submit()
+  assert.match(shell.notices.getSnapshot().text, /正在恢复/u)
+})
+
 test('file-only submit and mixed steering use the native sink and exact paths', async () => {
   const sent = []
   const { shell } = setup(async (...args) => { sent.push(args) })
@@ -88,6 +236,53 @@ test('file-only submit and mixed steering use the native sink and exact paths', 
   assert.equal(sent[1][1], '继续\n@.e-mate/imports/next.txt')
   assert.deepEqual(sent[1][2], ['native-image'])
   assert.equal(sent[1][3], 'steer')
+})
+
+test('durable image send clears refs on success and same-shell failure restores refs with ids', async () => {
+  const rc7Rollback = '\t\t\t\t\t\tshell?.restoreImages(imageIds);\n\t\t\t\t\t\tif (shell?.snapshot.draft === "") shell.setDraft(text);'
+  const durableRollback = '\t\t\t\t\t\tshell?.restoreFiles(files);\n\t\t\t\t\t\tshell?.restoreImages(imageIds, durableImages);\n\t\t\t\t\t\tif (shell?.snapshot.draft === "") shell.setDraft(draftText);'
+  assert.equal(native.includes(rc7Rollback), true)
+  assert.equal(adapted.includes(rc7Rollback), false)
+  assert.equal(adapted.includes(durableRollback), true)
+
+  const successStore = owners.createChatStore()
+  const successPersisted = successStore.init()
+  const successful = setup()
+  successful.shell.bindMirror((text, files, images) => successStore.actions.setDraft(successPersisted, text, files, images))
+  successful.shell.addDurableImages([draftImage()], ['success-id'])
+  successful.shell.submit()
+  assert.deepEqual(successful.shell.snapshot.imageRefs, [])
+  assert.deepEqual(successful.shell.snapshot.imageIds, [])
+  assert.deepEqual(successPersisted.imageRefs, [])
+
+  const failedStore = owners.createChatStore()
+  const failedPersisted = failedStore.init()
+  let reject
+  const failed = setup(() => new Promise((_resolve, fail) => { reject = fail }))
+  failed.shell.bindMirror((text, files, images) => failedStore.actions.setDraft(failedPersisted, text, files, images))
+  const failedDrafts = [draftImage(), draftImage('00000000-0000-4000-8000-000000000002', imageRef(2, 'b'))]
+  failed.shell.addDurableImages(failedDrafts, ['failed-a', 'failed-b'])
+  failed.shell.setDraft('发送')
+  failed.shell.submit()
+  assert.deepEqual(failed.shell.snapshot.imageRefs, [])
+  assert.deepEqual(failedPersisted.imageRefs, [])
+  reject(new Error('offline'))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(failed.shell.snapshot.imageRefs, failedDrafts)
+  assert.deepEqual(failedPersisted.imageRefs, failedDrafts)
+  assert.deepEqual(failed.shell.snapshot.imageIds, ['failed-a', 'failed-b'])
+  assert.deepEqual(failed.shell.snapshot.hydratedImageKeys, failedDrafts.map(item => item.draft_key))
+
+  let rejectLate
+  const late = setup(() => new Promise((_resolve, fail) => { rejectLate = fail }))
+  late.shell.addDurableImages([draftImage()], ['late-id'])
+  late.shell.submit()
+  const replacement = setup().shell
+  late.hub.shells.set('one', replacement)
+  rejectLate(new Error('gone'))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(late.released, ['late-id'])
+  assert.deepEqual(replacement.snapshot.imageRefs, [])
 })
 
 test('failed native send restores files and images without overwriting subsequent edits or crossing sessions', async () => {

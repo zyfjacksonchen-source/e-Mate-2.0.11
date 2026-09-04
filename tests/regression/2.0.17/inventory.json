@@ -168,10 +168,10 @@
       "priority": "P0",
       "release": "2.0.17-new",
       "platforms": ["web", "macos", "windows"],
-      "behavior": "Compact horizontal file cards use standard type icons, filename and extension labels inside the native composer; attachments, input and workspace footer grow within one continuous frame and edge light. Generated @ references and import paths stay out of draft, chat and message navigation display while exact file submission and real filename @ remain intact.",
-      "preconditions": "Native App or Web runtime, persisted legacy draft, PNG and ordinary file fixtures; live send needs a valid model route.",
+      "behavior": "Compact horizontal file cards use standard type icons, filename and extension labels inside the native composer; attachments, input and workspace footer grow within one continuous frame and edge light. Generated @ references and import paths stay out of draft, chat and message navigation display while exact file submission and real filename @ remain intact. Local PNG drafts persist only target-Session CAS metadata, hydrate with fresh native ids after restart, and block submit during staging or hydration. Selection commits image staging until native association; transient restore failures retain refs with explicit retry/remove actions.",
+      "preconditions": "Native App or Web runtime, persisted legacy draft, text plus five ordinary file refs and local chooser/drop/paste PNG fixtures; live send needs a valid model route.",
       "evidenceOwner": "main-agent-gui",
-      "evidence": "GUI EM217-GUI-ATT-006: start the integrated runtime; migrate old draft; add enough mixed files to wrap; remove/re-add; restart; verify cards, plain text and native controls; send/reopen and verify one exact reference per file with no generated @ display. Local display fixtures do not prove live send.",
+      "evidence": "GUI EM217-GUI-ATT-006: start the integrated runtime; migrate old draft; add text, five ordinary file refs and chooser/drop/paste PNG; verify in-flight image rows cannot be removed; fully restart; exercise transient retry/remove; verify the same native image reappears from its target-Session CAS ref with a fresh runtime id, cards/plain text/native controls remain, and submit stays blocked during staging/hydration; send/reopen and verify exact references with no generated @ display. Local display fixtures do not prove live send.",
       "evidenceFile": "EM217-GUI-ATT-006-receipt.json"
     },
     {

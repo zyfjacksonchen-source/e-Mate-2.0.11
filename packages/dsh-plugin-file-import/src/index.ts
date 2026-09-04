@@ -7,13 +7,18 @@ import {
   CHANNEL,
   MAX_FILE_BYTES,
   MAX_FILES,
+  IMAGE_MEDIA_TYPES,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGES,
+  MAX_IMAGE_TOTAL_BYTES,
   MAX_TOTAL_BYTES,
   normalizedSafeFileName,
+  type ImageAttachmentRef,
   type ImportedFile,
 } from './contract.ts'
 
 export const name = 'emate-file-import'
-export const inject = ['connection', 'workspaceRegistry']
+export const inject = ['connection', 'workspaceRegistry', 'attachments', 'sessions']
 
 interface WorkspaceView {
   readonly path: string
@@ -25,6 +30,28 @@ interface WorkspaceContext {
     readonly archivedSessionIds: readonly string[]
     list(): readonly WorkspaceView[]
   }
+}
+
+interface ImageStageContext extends WorkspaceContext {
+  readonly attachments: {
+    readonly imageLimits: {
+      readonly maxImageBytes: number
+      readonly maxImagesPerMessage: number
+      readonly maxMessageImageBytes: number
+      readonly mediaTypes: readonly string[]
+    }
+    saveImages(inputs: readonly { data: Uint8Array; mediaType: string; name?: string }[]): Promise<readonly ImageAttachmentRef[]>
+  }
+  readonly sessions: {
+    get(id: string): { append(type: string, data: unknown, options: { ignorable: true }): unknown } | undefined
+    flush(session: object): Promise<boolean>
+  }
+}
+
+interface EncodedImage {
+  readonly data: Uint8Array
+  readonly mediaType: typeof IMAGE_MEDIA_TYPES[number]
+  readonly name: string
 }
 
 interface EncodedFile {
@@ -78,6 +105,73 @@ function validatedDisplayName(value: unknown): string {
 
 function storedName(displayName: string): string {
   return displayName.replace(/[\s@]+/gu, '_')
+}
+
+function imageName(value: unknown): string {
+  if (typeof value !== 'string') throw new ImportValidationError('图片名称无效。')
+  const name = value.normalize('NFC')
+  if (name === '' || name === '.' || name === '..' || name !== name.trim()
+    || Buffer.byteLength(name, 'utf8') > 255 || name.includes('/') || name.includes('\\')
+    || Array.from(name).some(character => {
+      const code = character.codePointAt(0) as number
+      return code <= 0x1f || code === 0x7f
+    })) throw new ImportValidationError('图片名称无效。')
+  return name
+}
+
+function decodeImages(payload: unknown, limits: ImageStageContext['attachments']['imageLimits']): { sessionId: string; images: EncodedImage[] } {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) throw new ImportValidationError('图片暂存请求无效。')
+  const body = payload as Record<string, unknown>
+  const maxCount = Math.min(limits.maxImagesPerMessage, MAX_IMAGES)
+  if (!exactKeys(body, ['images', 'session_id']) || typeof body.session_id !== 'string'
+    || body.session_id.length < 1 || body.session_id.length > 256 || !Array.isArray(body.images)
+    || body.images.length < 1 || body.images.length > maxCount) throw new ImportValidationError('图片暂存请求无效。')
+  const maxBytes = Math.min(limits.maxImageBytes, MAX_IMAGE_BYTES)
+  const maxTotal = Math.min(limits.maxMessageImageBytes, MAX_IMAGE_TOTAL_BYTES)
+  let total = 0
+  const images = body.images.map((entry): EncodedImage => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) throw new ImportValidationError('图片暂存数据无效。')
+    const item = entry as Record<string, unknown>
+    if (!exactKeys(item, ['bytes_base64', 'media_type', 'name']) || typeof item.bytes_base64 !== 'string'
+      || item.bytes_base64.length === 0 || item.bytes_base64.length > Math.ceil(maxBytes / 3) * 4
+      || item.bytes_base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(item.bytes_base64)
+      || typeof item.media_type !== 'string' || !IMAGE_MEDIA_TYPES.includes(item.media_type as never)
+      || !limits.mediaTypes.includes(item.media_type)) throw new ImportValidationError('图片暂存数据无效。')
+    const bytes = Buffer.from(item.bytes_base64, 'base64')
+    if (bytes.byteLength === 0 || bytes.byteLength > maxBytes || bytes.toString('base64') !== item.bytes_base64) {
+      throw new ImportValidationError('图片暂存数据无效。')
+    }
+    total += bytes.byteLength
+    if (total > maxTotal) throw new ImportValidationError('图片总大小超过当前消息限制。')
+    return { data: new Uint8Array(bytes), mediaType: item.media_type as EncodedImage['mediaType'], name: imageName(item.name) }
+  })
+  return { sessionId: body.session_id, images }
+}
+
+function imageValidationMessage(error: unknown): string | undefined {
+  const code = error !== null && typeof error === 'object' ? (error as { code?: unknown }).code : undefined
+  if (code === 'TOO_MANY_IMAGES') return '图片数量超过当前消息限制。'
+  if (code === 'IMAGES_TOO_LARGE') return '图片总大小超过当前消息限制。'
+  if (code === 'IMAGE_TOO_LARGE') return '图片超过单文件大小限制。'
+  if (code === 'UNSUPPORTED_IMAGE_TYPE' || code === 'IMAGE_TYPE_MISMATCH') return '仅支持 PNG、JPEG、WebP 和 GIF 图片。'
+  if (code === 'IMAGE_TOO_MANY_PIXELS') return '图片尺寸超过当前限制。'
+  if (code === 'INVALID_IMAGE' || code === 'INVALID_IMAGE_BASE64') return '图片暂存数据无效。'
+  return undefined
+}
+
+async function stageImages(ctx: ImageStageContext, payload: unknown, signal: AbortSignal): Promise<readonly ImageAttachmentRef[]> {
+  signal.throwIfAborted()
+  const request = decodeImages(payload, ctx.attachments.imageLimits)
+  await workspaceRoot(ctx, request.sessionId)
+  const session = ctx.sessions.get(request.sessionId)
+  if (session === undefined) throw new ImportValidationError('当前会话不可用。')
+  signal.throwIfAborted()
+  const refs = await ctx.attachments.saveImages(request.images)
+  signal.throwIfAborted()
+  if (refs.length !== request.images.length) throw new Error('attachment staging cardinality mismatch')
+  session.append('emate/image-draft-staged', { schema_version: 1, content: refs.map(attachment => ({ type: 'image', attachment })) }, { ignorable: true })
+  if (await ctx.sessions.flush(session) !== true) throw new Error('session staging event was not durably flushed')
+  return refs
 }
 
 function decodeFiles(payload: unknown): { sessionId: string; files: EncodedFile[] } {
@@ -273,14 +367,23 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.connection.rpc.handle(
     CHANNEL,
     async (endpoint: string, payload: unknown, signal: AbortSignal) => {
-      if (endpoint !== 'import') return badRequest('未知文件导入操作。')
+      if (endpoint !== 'import' && endpoint !== 'stage-images') return badRequest('未知文件导入操作。')
       try {
+        if (endpoint === 'stage-images') {
+          const attachments = await stageImages(ctx as unknown as ImageStageContext, payload, signal)
+          return { ok: true, value: { schema_version: 1, attachments } }
+        }
         const request = decodeFiles(payload)
         const root = await workspaceRoot(ctx, request.sessionId)
         const files = await importIntoWorkspace(root, request.files, signal)
         return { ok: true, value: { schema_version: 1, files } }
       } catch (error) {
         if (error instanceof ImportValidationError) return badRequest(error.message)
+        if (endpoint === 'stage-images') {
+          if (signal.aborted) return badRequest('图片暂存已取消。')
+          const imageMessage = imageValidationMessage(error)
+          if (imageMessage !== undefined) return badRequest(imageMessage)
+        }
         console.error('[emate-file-import] internal import failure', diagnostic(error))
         return internalError()
       }

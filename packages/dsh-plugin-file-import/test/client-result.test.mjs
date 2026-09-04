@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseImportResult, SAFE_IMPORT_ERROR_MESSAGE, safeThrownImportMessage } from '../src/client/result.ts'
+import { parseImageStageResult, parseImportResult, SAFE_IMPORT_ERROR_MESSAGE, safeThrownImportMessage } from '../src/client/result.ts'
 
 const validation = message => ({ ok: false, error: { code: 'bad-request', message, details: { issues: [] } } })
 
@@ -44,6 +44,25 @@ test('rejects duplicate stored names and relative paths before mentions are appe
   assert.deepEqual(parseImportResult({ ok: true, value: { schema_version: 1, files: [file, file] } }), {
     ok: false, message: SAFE_IMPORT_ERROR_MESSAGE,
   })
+})
+
+test('strictly parses staged image refs without accepting bytes, paths, or malformed metadata', () => {
+  const ref = { attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', bytes: 1, width: 1, height: 1, name: '像素.png' }
+  const success = attachment => ({ ok: true, value: { schema_version: 1, attachments: [attachment] } })
+  assert.deepEqual(parseImageStageResult(success(ref)), { ok: true, attachments: [ref] })
+  assert.deepEqual(parseImageStageResult({ ok: true, value: { schema_version: 1, attachments: [ref, ref] } }), { ok: true, attachments: [ref, ref] })
+  const exact = { ...ref, bytes: 5 * 1024 * 1024 }
+  const twenty = Array.from({ length: 20 }, () => exact)
+  assert.deepEqual(parseImageStageResult({ ok: true, value: { schema_version: 1, attachments: twenty } }), { ok: true, attachments: twenty })
+  assert.deepEqual(parseImageStageResult({ ok: true, value: { schema_version: 1, attachments: [...twenty, exact] } }), { ok: false, message: SAFE_IMPORT_ERROR_MESSAGE })
+  for (const value of [
+    success({ ...ref, attachmentId: 'native-runtime-id' }), success({ ...ref, bytes: 0 }), success({ ...ref, bytes: 5 * 1024 * 1024 + 1 }),
+    success({ ...ref, mediaType: 'image/svg+xml' }), success({ ...ref, width: 1.5 }), success({ ...ref, width: 10_000, height: 4_001 }), success({ ...ref, name: '../private.png' }),
+    success({ ...ref, name: '.' }), success({ ...ref, name: 'e\u0301.png' }), success({ ...ref, name: `${'界'.repeat(84)}.png` }),
+    success({ ...ref, bytes_base64: 'AQ==' }), { ok: true, value: { schema_version: 1, attachments: [ref], path: '/tmp/a' } },
+  ]) assert.deepEqual(parseImageStageResult(value), { ok: false, message: SAFE_IMPORT_ERROR_MESSAGE })
+  assert.deepEqual(parseImageStageResult(validation('图片暂存数据无效。')), { ok: false, message: '图片暂存数据无效。' })
+  assert.deepEqual(parseImageStageResult(validation('图片尺寸超过当前限制。')), { ok: false, message: '图片尺寸超过当前限制。' })
 })
 
 test('maps transport and thrown Zod-like invalid_union values to fixed safe copy', () => {

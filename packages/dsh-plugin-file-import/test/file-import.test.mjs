@@ -6,7 +6,7 @@ import test from 'node:test'
 import { apply, importIntoWorkspace } from '../src/index.ts'
 import { ALLOWED_MEDIA_BY_EXTENSION, appendImportedMentions, CHANNEL, fileDropRoute, MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES } from '../src/contract.ts'
 
-async function mounted(workspace, archivedSessionIds = []) {
+async function mounted(workspace, archivedSessionIds = [], services = {}) {
   let handler
   let options
   apply({
@@ -18,6 +18,7 @@ async function mounted(workspace, archivedSessionIds = []) {
       return () => {}
     } } },
     workspaceRegistry: { archivedSessionIds, list: () => [{ path: workspace, sessionIds: ['session-1'] }] },
+    ...services,
   })
   return { handler, options }
 }
@@ -28,6 +29,137 @@ const encoded = (name, bytes = Buffer.from('content'), mediaType = 'application/
 const invoke = (handler, files, sessionId = 'session-1') => handler(
   'import', { session_id: sessionId, files }, new AbortController().signal,
 )
+const imageEncoded = (overrides = {}) => ({ name: '像素.png', media_type: 'image/png', bytes_base64: 'AQ==', ...overrides })
+const imageRef = { attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', bytes: 1, width: 1, height: 1, name: '像素.png' }
+async function imageMounted(workspace, options = {}) {
+  const calls = []
+  const session = { append(type, data, eventOptions) { calls.push(['append', type, data, eventOptions]); if (options.appendError) throw options.appendError } }
+  const services = {
+    attachments: {
+      imageLimits: { maxImageBytes: 5 * 1024 * 1024, maxImagesPerMessage: 20, maxMessageImageBytes: 100 * 1024 * 1024, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] },
+      async saveImages(inputs) { calls.push(['save', inputs]); if (options.saveError) throw options.saveError; options.afterSave?.(); return options.refs ?? [imageRef] },
+    },
+    sessions: { get(id) { calls.push(['get', id]); return options.missing ? undefined : session }, async flush(value) { calls.push(['flush', value]); if (options.flushError) throw options.flushError; options.afterFlush?.(); return options.flush ?? true } },
+  }
+  const mountedResult = await mounted(workspace, [], services)
+  return { ...mountedResult, calls, session }
+}
+const stage = (handler, images = [imageEncoded()], signal = new AbortController().signal, sessionId = 'session-1') =>
+  handler('stage-images', { session_id: sessionId, images }, signal)
+
+test('stages images through AttachmentStore, appends authorization content, and flushes before returning refs', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-image-stage-'))
+  const { handler, calls, session } = await imageMounted(workspace)
+  const result = await stage(handler)
+  assert.deepEqual(result, { ok: true, value: { schema_version: 1, attachments: [imageRef] } })
+  assert.deepEqual(calls.map(call => call[0]), ['get', 'save', 'append', 'flush'])
+  assert.deepEqual(calls[1][1], [{ data: Uint8Array.of(1), mediaType: 'image/png', name: '像素.png' }])
+  assert.deepEqual(calls[2].slice(1), ['emate/image-draft-staged', { schema_version: 1, content: [{ type: 'image', attachment: imageRef }] }, { ignorable: true }])
+  assert.equal(calls[3][1], session)
+  assert.doesNotMatch(JSON.stringify(result), /bytes_base64|AQ==|\.e-mate|\/tmp/u)
+})
+
+test('image staging accepts exact 5 MiB, 20 image, and 100 MiB hard boundaries', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-image-stage-boundary-'))
+  const bytes = Buffer.alloc(5 * 1024 * 1024, 1)
+  const ref = { ...imageRef, bytes: bytes.byteLength }
+  const refs = Array.from({ length: 20 }, () => ref)
+  const { handler, calls } = await imageMounted(workspace, { refs })
+  const bytes_base64 = bytes.toString('base64')
+  const images = Array.from({ length: 20 }, (_, index) => imageEncoded({ name: `exact-${index}.png`, bytes_base64 }))
+  const result = await stage(handler, images)
+  assert.equal(result.ok, true)
+  assert.equal(result.value.attachments.length, 20)
+  assert.equal(calls.find(call => call[0] === 'save')[1].reduce((sum, image) => sum + image.data.byteLength, 0), 100 * 1024 * 1024)
+})
+
+test('image staging NFC-normalizes names and accepts the exact 255-byte boundary', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-image-stage-name-'))
+  const { handler, calls } = await imageMounted(workspace, { refs: [imageRef, imageRef] })
+  const exact = `${'a'.repeat(251)}.png`
+  const result = await stage(handler, [imageEncoded({ name: 'e\u0301.png' }), imageEncoded({ name: exact })])
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls.find(call => call[0] === 'save')[1].map(image => image.name), ['é.png', exact])
+  assert.equal(Buffer.byteLength(exact), 255)
+})
+
+test('image staging validates membership, canonical bounded base64, media, names, and abort', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-image-stage-invalid-'))
+  const { handler } = await imageMounted(workspace)
+  for (const image of [
+    imageEncoded({ bytes_base64: '**' }), imageEncoded({ bytes_base64: 'YQ' }), imageEncoded({ bytes_base64: 'YR==' }),
+    imageEncoded({ media_type: 'image/svg+xml' }), imageEncoded({ name: '../secret.png' }), imageEncoded({ name: ' bad.png' }),
+    imageEncoded({ name: '' }), imageEncoded({ name: '.' }), imageEncoded({ name: '..' }), imageEncoded({ name: `${'界'.repeat(84)}.png` }),
+  ]) assert.equal((await stage(handler, [image])).error.code, 'bad-request')
+  assert.equal((await stage(handler, Array.from({ length: 21 }, () => imageEncoded()))).error.code, 'bad-request')
+  assert.equal((await stage(handler, [imageEncoded()], new AbortController().signal, 'missing')).error.code, 'bad-request')
+  const controller = new AbortController(); controller.abort(new Error('private abort bytes AQ=='))
+  assert.deepEqual(await stage(handler, [imageEncoded()], controller.signal), {
+    ok: false, error: { code: 'bad-request', message: '图片暂存已取消。', details: { issues: [] } },
+  })
+})
+
+test('maps native pixel admission to bounded validation while storage and corruption stay internal', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-image-stage-native-errors-'))
+  const original = console.error; console.error = () => {}
+  try {
+    const pixels = await imageMounted(workspace, { saveError: Object.assign(new Error('pixel detail'), { code: 'IMAGE_TOO_MANY_PIXELS' }) })
+    assert.deepEqual(await stage(pixels.handler), { ok: false, error: { code: 'bad-request', message: '图片尺寸超过当前限制。', details: { issues: [] } } })
+    for (const code of ['ATTACHMENT_WRITE_FAILED', 'ATTACHMENT_CORRUPT']) {
+      const failed = await imageMounted(workspace, { saveError: Object.assign(new Error('/private/AQ=='), { code }) })
+      assert.deepEqual(await stage(failed.handler), { ok: false, error: { code: 'internal', message: '文件暂时无法导入当前工作区。', details: {} } })
+    }
+  } finally { console.error = original }
+})
+
+test('ordinary import abort preserves its fixed internal failure behavior', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-file-import-abort-scope-'))
+  const { handler } = await mounted(workspace)
+  const controller = new AbortController(); controller.abort(new Error('ordinary abort'))
+  const original = console.error; console.error = () => {}
+  try {
+    assert.deepEqual(await handler('import', { session_id: 'session-1', files: [encoded('note.txt')] }, controller.signal), {
+      ok: false, error: { code: 'internal', message: '文件暂时无法导入当前工作区。', details: {} },
+    })
+  } finally { console.error = original }
+})
+
+test('abort after durable flush still returns committed refs', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-image-stage-post-flush-abort-'))
+  const controller = new AbortController()
+  const { handler, calls } = await imageMounted(workspace, { afterFlush: () => { controller.abort(new Error('late stop')) } })
+  assert.deepEqual(await stage(handler, [imageEncoded()], controller.signal), {
+    ok: true, value: { schema_version: 1, attachments: [imageRef] },
+  })
+  assert.deepEqual(calls.map(call => call[0]), ['get', 'save', 'append', 'flush'])
+})
+
+test('post-save abort leaves the CAS object orphaned but returns no ref and appends no event', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-image-stage-post-save-abort-'))
+  const controller = new AbortController()
+  const { handler, calls } = await imageMounted(workspace, { afterSave: () => { controller.abort(new Error('stop')) } })
+  const result = await stage(handler, [imageEncoded()], controller.signal)
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'bad-request')
+  assert.deepEqual(calls.map(call => call[0]), ['get', 'save'])
+  assert.doesNotMatch(JSON.stringify(result), /sha256/u)
+})
+
+test('image staging never returns refs after save, append, or flush failure', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-image-stage-failure-'))
+  for (const options of [
+    { saveError: Object.assign(new Error('disk /private/AQ=='), { code: 'EIO' }) },
+    { appendError: new Error('append leaked AQ==') }, { flushError: new Error('flush leaked AQ==') }, { flush: false },
+  ]) {
+    const { handler } = await imageMounted(workspace, options)
+    const original = console.error; console.error = () => {}
+    try {
+      const result = await stage(handler)
+      assert.deepEqual(result, { ok: false, error: { code: 'internal', message: '文件暂时无法导入当前工作区。', details: {} } })
+      assert.doesNotMatch(JSON.stringify(result), /sha256|AQ==|private/u)
+    } finally { console.error = original }
+  }
+})
 
 test('imports every allowlisted ordinary extension through one canonical host path', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'emate-file-import-types-'))

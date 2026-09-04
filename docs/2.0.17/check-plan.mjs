@@ -25,6 +25,7 @@ const orders = JSON.parse(ordersText)
 const batchSchema = JSON.parse(batchSchemaText)
 const batchResultSchema = JSON.parse(batchResultSchemaText)
 const latencyManifest = JSON.parse(latencyManifestText)
+const fileImportPackage = JSON.parse(await readFile(new URL('../../packages/dsh-plugin-file-import/package.json', here), 'utf8'))
 const active = baseline.active
 
 assert.equal(active.emate_baseline_sha, 'f876f01d8280e4ab20fe83b88c36c7fe7a662135')
@@ -85,9 +86,13 @@ assert.deepEqual(fileImport.write_set, [
   'tests/regression/2.0.17/inventory.json',
   'tests/regression/2.0.17/inventory.test.mjs',
   'packages/dsh-plugin-file-import/**',
+  'scripts/harness-conversation-adapter.mjs',
+  'scripts/harness-conversation-adapter.test.mjs',
 ])
 assert(t('EM217-501').depends_on.includes('EM217-307'))
-assert(fileImport.tests.includes('MAIN-AGENT-ONLY COMPONENT CHECK (requires installed pinned Harness workspace): workdir: upstream/deepseek-harness; node_modules/.bin/vitest run --config ../../packages/dsh/profile/plugins/emate-shell/vitest.config.ts ../../packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx'))
+assert(fileImport.tests.includes('MAIN-AGENT-ONLY COMPONENT CHECK (after corepack pnpm run build:harness): workdir: upstream/deepseek-harness; node_modules/.bin/vitest run --root ../.. --config packages/dsh/profile/plugins/emate-shell/vitest.config.ts packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx'))
+assert.equal(fileImportPackage.scripts['test:client'], 'cd ../../upstream/deepseek-harness && node_modules/.bin/vitest run --root ../.. --config packages/dsh/profile/plugins/emate-shell/vitest.config.ts packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx')
+assert.match(fileImportPackage.scripts.check, /(?:^|&&\s*)pnpm test:client(?:\s*&&|$)/u)
 assert(!text('EM217-307').includes('pnpm exec'), 'EM217-307 must call the already-installed pinned Harness vitest binary directly')
 assert(executionText.includes('The main agent is sole integrator'))
 for (const required of ['internal', 'bad-request', 'ALLOWED_MEDIA_BY_EXTENSION', 'NFC', '零字节', '16 MiB', '32 MiB', 'batch rollback', 'serverResponseSchema', 'invalid_union', 'native image']) {

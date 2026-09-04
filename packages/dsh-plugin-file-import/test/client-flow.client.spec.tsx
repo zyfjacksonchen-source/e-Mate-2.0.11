@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import * as jsxRuntime from 'react/jsx-runtime'
 import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -9,7 +9,7 @@ import { InputBar } from '../../../upstream/deepseek-harness/packages/client/ui-
 import { SessionInputShell } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
 import { registerChatNodeRenderers } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/chat/register-node-renderers.ts'
 import { adaptHarnessConversationSource } from '../../../scripts/harness-conversation-adapter.mjs'
-import { addNativeImages, apply, inject, FILE_PICK_EVENT, FileCards, FileImportControl } from '../src/client/index.tsx'
+import { apply, inject, FILE_PICK_EVENT, FileCards, FileImportControl } from '../src/client/index.tsx'
 import { importedDraft, importedMessage, type FileReference } from '../src/client/references.ts'
 
 const imported = {
@@ -17,6 +17,10 @@ const imported = {
   relative_path: '.e-mate/imports/报告_带空格_验证.txt', stored_name: '报告_带空格_验证.txt',
 }
 const success = { ok: true, value: { schema_version: 1, files: [imported] } }
+const attachment = { attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', bytes: 4, width: 1, height: 1, name: 'picture.png' }
+const staged = { ok: true, value: { schema_version: 1, attachments: [attachment] } }
+const stagedDuplicates = { ok: true, value: { schema_version: 1, attachments: [attachment, attachment] } }
+const DEFAULT_IMAGE_LIMITS = { maxImageBytes: 5 * 1024 * 1024, maxImagesPerMessage: 20, maxMessageImageBytes: 100 * 1024 * 1024, maxImagePixels: 40_000_000, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] }
 function file(name = imported.display_name, type = 'text/plain'): File {
   const value = new File(['note'], name, { type })
   const arrayBuffer = async () => new TextEncoder().encode('note').buffer
@@ -28,19 +32,48 @@ function picker(): HTMLInputElement { return document.querySelector('input[type=
 
 // React store fixture for the plugin's native InputState face. The actual
 // transformed native facade/store/hub are exercised by the adapter self-check.
-function Composer({ sessionId = 'one', draft = '', files = [], callImport = vi.fn(), addImages = () => null }: {
-  sessionId?: string; draft?: string; files?: readonly FileReference[]; callImport?: any; addImages?: any
+function Composer({
+  sessionId = 'one', draft = '', files = [], images = [], callImport = vi.fn().mockResolvedValue(success),
+  callRpc, createDraftImages = (selected: readonly File[]) => selected.map((value, index) => ({ id: `native-${index}`, file: value })),
+  readAttachment = vi.fn(), acceptImages = true, onDurableImages, onHydrate, onRemoveImage, onRelease, onBeginStage, onCancelStage, refuseHydration = false,
+  limits = DEFAULT_IMAGE_LIMITS,
+}: {
+  sessionId?: string; draft?: string; files?: readonly FileReference[]; images?: readonly any[]; callImport?: any; callRpc?: any
+  createDraftImages?: any; readAttachment?: any; acceptImages?: boolean; onDurableImages?: any; onHydrate?: any
+  onRemoveImage?: any; onRelease?: any; onBeginStage?: any; onCancelStage?: any; refuseHydration?: boolean; limits?: any
 }) {
-  const [input, setInput] = useState({ draft, fileRefs: files, phase: 'plain' })
+  const [input, setInput] = useState({ draft, fileRefs: files, phase: 'plain', imageIds: [] as string[], imageRefs: images as any[], hydratedImageKeys: [] as string[], runtimeOnlyImageIds: [] as string[], imageStagePending: false })
   const actions = useMemo(() => ({
     addFiles(added: readonly FileReference[], text?: string) {
       setInput(current => ({ ...current, draft: text ?? current.draft, fileRefs: [...current.fileRefs, ...added] }))
       return true
     },
     removeFile(path: string) { setInput(current => ({ ...current, fileRefs: current.fileRefs.filter(file => file.relative_path !== path) })) },
-  }), [])
+    beginImageStage() { onBeginStage?.(); setInput(current => ({ ...current, imageStagePending: true })); return true },
+    cancelImageStage() { onCancelStage?.(); setInput(current => ({ ...current, imageStagePending: false })) },
+    addDurableImages(added: readonly any[], ids: readonly string[]) {
+      if (!acceptImages) return false
+      onDurableImages?.(added, ids)
+      setInput(current => ({ ...current, imageStagePending: false, imageRefs: [...current.imageRefs, ...added], imageIds: [...current.imageIds, ...ids], hydratedImageKeys: [...current.hydratedImageKeys, ...added.map(item => item.draft_key)] }))
+      return true
+    },
+    hydrateDurableImage(key: string, id: string) {
+      if (refuseHydration) return false
+      onHydrate?.(key, id)
+      setInput(current => ({ ...current, imageIds: [...current.imageIds, id], hydratedImageKeys: [...current.hydratedImageKeys, key] }))
+      return true
+    },
+    removeDurableImage(key: string) { onRemoveImage?.(key); setInput(current => ({ ...current, imageRefs: current.imageRefs.filter(item => item.draft_key !== key) })); return undefined },
+  }), [acceptImages, onBeginStage, onCancelStage, onDurableImages, onHydrate, onRemoveImage, refuseHydration])
+  const releaseDraftImages = useMemo(() => (released: readonly any[]) => { onRelease?.(released) }, [onRelease])
+  const resolveDraftImages = useCallback(() => [], [])
+  const sendNotice = useCallback(() => {}, [])
+  const getImageLimits = useCallback(() => limits, [limits])
   return <FileImportControl sessionId={sessionId} input={input} inputActions={actions} isLoopback
-    callImport={callImport} addImages={addImages}
+    call={callRpc ?? ((endpoint: string, payload: unknown, _signal?: AbortSignal) => endpoint === 'import' ? callImport(payload) : Promise.resolve(staged))}
+    createDraftImages={createDraftImages} draftImages={resolveDraftImages} releaseDraftImages={releaseDraftImages}
+    readAttachment={readAttachment} imageLimits={getImageLimits}
+    notify={sendNotice}
     renderComposer={({ accessory, controls, pending }) => <div data-composer-card>{accessory}<textarea readOnly value={input.draft} /><button disabled={pending}>发送</button>{controls}</div>} />
 }
 afterEach(cleanup)
@@ -116,27 +149,76 @@ describe('file import composer lifecycle', () => {
     expect(callImport).toHaveBeenCalledTimes(2)
   })
 
-  it('uses the native image facade for a mixed picker batch without synthetic drops', async () => {
+  it('stages a mixed picker batch before native image association without synthetic drops', async () => {
     const callImport = vi.fn().mockResolvedValue(success)
-    const addImages = vi.fn(() => null)
+    const createDraftImages = vi.fn((selected: readonly File[]) => selected.map(value => ({ id: 'fresh-native', file: value })))
     const drop = vi.fn()
     document.addEventListener('drop', drop)
     try {
-      render(<React.StrictMode><Composer callImport={callImport} addImages={addImages} /></React.StrictMode>)
+      render(<React.StrictMode><Composer callImport={callImport} createDraftImages={createDraftImages} /></React.StrictMode>)
       fireEvent.change(picker(), { target: { files: [file('picture.png', 'image/png'), file()] } })
       await screen.findByRole('button', { name: `移除 ${imported.display_name}` })
-      expect(addImages).toHaveBeenCalledOnce()
-      expect(addImages.mock.calls[0]![0][0].name).toBe('picture.png')
+      expect(createDraftImages).toHaveBeenCalledOnce()
+      expect(createDraftImages.mock.calls[0]![0][0].name).toBe('picture.png')
       expect(drop).not.toHaveBeenCalled()
       expect(callImport.mock.calls[0]![0].files).toHaveLength(1)
     } finally { document.removeEventListener('drop', drop) }
   })
 
+  it('preserves duplicate CAS refs with distinct durable draft keys and exact cardinality', async () => {
+    const callRpc = vi.fn(async (endpoint: string, _payload: unknown) => endpoint === 'stage-images' ? stagedDuplicates : success)
+    const onDurableImages = vi.fn()
+    const duplicate = file('same.png', 'image/png')
+    render(<Composer callRpc={callRpc} onDurableImages={onDurableImages} />)
+    fireEvent.change(picker(), { target: { files: [duplicate, duplicate] } })
+    await waitFor(() => expect(onDurableImages).toHaveBeenCalledOnce())
+    expect(callRpc).toHaveBeenCalledOnce()
+    expect(callRpc.mock.calls[0]![0]).toBe('stage-images')
+    expect(callRpc.mock.calls[0]![1].images).toHaveLength(2)
+    const [drafts, ids] = onDurableImages.mock.calls[0]!
+    expect(drafts).toHaveLength(2)
+    expect(drafts[0].attachment).toEqual(attachment)
+    expect(drafts[1].attachment).toEqual(attachment)
+    expect(drafts[0].draft_key).not.toBe(drafts[1].draft_key)
+    expect(ids).toEqual(['native-0', 'native-1'])
+  })
+
+  it('stages untyped image drop and paste exactly once through the shared path', async () => {
+    const callRpc = vi.fn(async (endpoint: string) => endpoint === 'stage-images' ? staged : success)
+    render(<Composer callRpc={callRpc} />)
+    const dropped = file('drop.png', '')
+    fireEvent.drop(document.querySelector('[data-composer-card]')!, {
+      dataTransfer: { files: [dropped], items: [{ webkitGetAsEntry: () => ({ isDirectory: false }) }] },
+    })
+    await waitFor(() => expect(callRpc).toHaveBeenCalledTimes(1))
+    expect(callRpc.mock.calls[0]![0]).toBe('stage-images')
+    const pasted = file('paste.png', '')
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { items: [{ kind: 'file', getAsFile: () => pasted }], files: [pasted], getData: () => '' },
+    })
+    await waitFor(() => expect(callRpc).toHaveBeenCalledTimes(2))
+    expect(callRpc.mock.calls.map(call => call[0])).toEqual(['stage-images', 'stage-images'])
+  })
+
+  it('releases no runtime descriptor when session disposal wins before staging settles', async () => {
+    let finish!: (value: unknown) => void
+    const callRpc = vi.fn(() => new Promise(resolve => { finish = resolve }))
+    const createDraftImages = vi.fn()
+    const view = render(<Composer callRpc={callRpc} createDraftImages={createDraftImages} />)
+    fireEvent.change(picker(), { target: { files: [file('picture.png', 'image/png')] } })
+    await waitFor(() => expect(callRpc).toHaveBeenCalledOnce())
+    view.unmount()
+    finish(staged)
+    await Promise.resolve()
+    expect(createDraftImages).not.toHaveBeenCalled()
+  })
+
   it('reports selected image refusal instead of silently losing it', async () => {
-    render(<Composer addImages={() => '当前正在发送消息，图片未加入草稿，请稍后重试。'} />)
+    render(<Composer acceptImages={false} />)
     fireEvent.change(picker(), { target: { files: [file('picture.png', 'image/png')] } })
     await screen.findByText('当前正在发送消息，图片未加入草稿，请稍后重试。')
     expect(screen.getByText('picture.png')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false)
   })
 
   it('migrates legacy imported paths into removable cards without changing native workspace mentions', async () => {
@@ -159,6 +241,72 @@ describe('file import composer lifecycle', () => {
     resolve(success)
     await waitFor(() => expect(screen.getByRole('button', { name: '添加本地图片或文件' }).hasAttribute('disabled')).toBe(false))
     expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('commits selected image rows until staging associates every original index', async () => {
+    const refs = ['a', 'b', 'c'].map((digit, index) => ({ ...attachment, attachmentId: `sha256:${digit.repeat(64)}`, name: `image-${index}.png` }))
+    let finish!: (value: unknown) => void
+    const callRpc = vi.fn(() => new Promise(resolve => { finish = resolve }))
+    const created = vi.fn((selected: readonly File[]) => selected.map(file => ({ id: `native-${file.name}`, file })))
+    const added = vi.fn()
+    render(<Composer callRpc={callRpc} createDraftImages={created} onDurableImages={added} />)
+    fireEvent.change(picker(), { target: { files: refs.map(ref => file(ref.name, 'image/png')) } })
+    await waitFor(() => expect(callRpc).toHaveBeenCalledOnce())
+    for (const ref of refs) expect(screen.queryByRole('button', { name: `移除 ${ref.name}` })).toBeNull()
+    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true)
+    finish({ ok: true, value: { schema_version: 1, attachments: refs } })
+    await waitFor(() => expect(added).toHaveBeenCalledOnce())
+    expect(created.mock.calls[0]![0].map((value: File) => value.name)).toEqual(refs.map(ref => ref.name))
+    const [drafts, ids] = added.mock.calls[0]!
+    expect(drafts.map((draft: any) => draft.attachment)).toEqual(refs)
+    expect(ids).toEqual(refs.map(ref => `native-${ref.name}`))
+  })
+
+  it('aborts the initiating image stage on session switch and ignores its late result', async () => {
+    let finish!: (value: unknown) => void
+    let signal!: AbortSignal
+    const callRpc = vi.fn((_endpoint: string, _payload: unknown, active?: AbortSignal) => {
+      signal = active!
+      return new Promise(resolve => { finish = resolve })
+    })
+    const cancelled = vi.fn()
+    const added = vi.fn()
+    const created = vi.fn()
+    const released = vi.fn()
+    const view = render(<Composer callRpc={callRpc} onCancelStage={cancelled} onDurableImages={added} createDraftImages={created} onRelease={released} />)
+    fireEvent.change(picker(), { target: { files: [file('switch.png', 'image/png')] } })
+    await waitFor(() => expect(callRpc).toHaveBeenCalledOnce())
+    expect(signal.aborted).toBe(false)
+    view.rerender(<Composer sessionId="two" callRpc={callRpc} onCancelStage={cancelled} onDurableImages={added} createDraftImages={created} onRelease={released} />)
+    expect(signal.aborted).toBe(true)
+    expect(cancelled).toHaveBeenCalledOnce()
+    finish(staged)
+    await Promise.resolve()
+    expect(added).not.toHaveBeenCalled()
+    expect(created).not.toHaveBeenCalled()
+    expect(released).not.toHaveBeenCalled()
+    expect(cancelled).toHaveBeenCalledOnce()
+  })
+
+  it('uses the native 120s timeout signal and clears the stage reservation on abort', async () => {
+    const timeout = new AbortController()
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal)
+    const cancelled = vi.fn()
+    let signal!: AbortSignal
+    const callRpc = vi.fn((_endpoint: string, _payload: unknown, active?: AbortSignal) => {
+      signal = active!
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => { reject(signal.reason) }, { once: true }))
+    })
+    try {
+      render(<Composer callRpc={callRpc} onCancelStage={cancelled} />)
+      fireEvent.change(picker(), { target: { files: [file('timeout.png', 'image/png')] } })
+      await waitFor(() => expect(callRpc).toHaveBeenCalledOnce())
+      expect(timeoutSpy).toHaveBeenCalledWith(120_000)
+      timeout.abort(new DOMException('timeout', 'TimeoutError'))
+      await screen.findByText('文件暂时无法导入当前工作区。')
+      expect(cancelled).toHaveBeenCalledOnce()
+      expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false)
+    } finally { timeoutSpy.mockRestore() }
   })
 
   it('drops an old in-flight result after switching sessions', async () => {
@@ -191,18 +339,117 @@ describe('file import composer lifecycle', () => {
     expect(importedDraft('@src/main.ts @.e-mate/imports/../secret.txt').files).toEqual([])
   })
 
-  it('uses native addImages admission even when the model catalog blocks submitting', () => {
-    const images = [{ id: 'native-image' }]
-    const shell = { state: { getSnapshot: () => ({ imageIds: [] }) }, addImages: vi.fn(() => true) }
-    const ctx = {
-      sessions: { scope: () => ({}), binding: () => ({ session: { projections: { faceOf: () => ({ getSnapshot: () => undefined }) } } }) },
-      conversation: { input: { for: () => shell }, draftImages: () => [], createDraftImages: vi.fn(() => images), releaseDraftImages: vi.fn() },
-    }
-    expect(addNativeImages(ctx, 'one', [file('picture.png', 'image/png')])).toBeNull()
-    expect(shell.addImages).toHaveBeenCalledWith(['native-image'])
-    shell.addImages.mockReturnValue(false)
-    expect(addNativeImages(ctx, 'one', [file('picture.png', 'image/png')])).toContain('图片未加入草稿')
-    expect(ctx.conversation.releaseDraftImages).toHaveBeenCalledWith(images)
+  it('hydrates a persisted image with a fresh native id through readAttachment', async () => {
+    const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
+    const created = vi.fn((selected: readonly File[]) => [{ id: 'fresh-after-restart', file: selected[0] }])
+    const readAttachment = vi.fn().mockResolvedValue({ ok: true, value: { attachment, data: new TextEncoder().encode('note') } })
+    render(<Composer draft="正文" files={Array.from({ length: 5 }, (_, index) => ({ ...imported, stored_name: `file-${index}.txt`, relative_path: `.e-mate/imports/file-${index}.txt` }))}
+      images={[draft]} createDraftImages={created} readAttachment={readAttachment} />)
+    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true)
+    await waitFor(() => expect(created).toHaveBeenCalledOnce())
+    expect(readAttachment).toHaveBeenCalledWith(attachment)
+    expect(created.mock.calls[0]![0][0].name).toBe('picture.png')
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('正文')
+    expect(screen.getAllByRole('button', { name: /移除/u })).toHaveLength(5)
+  })
+
+  it('hydrates multiple refs once each across StrictMode rerenders', async () => {
+    const secondAttachment = { ...attachment, attachmentId: `sha256:${'b'.repeat(64)}`, name: 'second.png' }
+    const drafts = [
+      { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment },
+      { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000002', attachment: secondAttachment },
+    ]
+    const readAttachment = vi.fn(async (ref: any) => ({ ok: true, value: { attachment: ref, data: new TextEncoder().encode('note') } }))
+    const created = vi.fn((selected: readonly File[]) => [{ id: `native-${selected[0]!.name}`, file: selected[0] }])
+    const hydrated = vi.fn()
+    const callRpc = vi.fn()
+    render(<React.StrictMode><Composer callRpc={callRpc} images={drafts} readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} /></React.StrictMode>)
+    await waitFor(() => expect(hydrated).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
+    expect(readAttachment).toHaveBeenCalledTimes(2)
+    expect(created).toHaveBeenCalledTimes(2)
+    expect(callRpc).not.toHaveBeenCalled()
+    expect(readAttachment.mock.calls.map(call => call[0].attachmentId).sort()).toEqual([attachment.attachmentId, secondAttachment.attachmentId].sort())
+  })
+
+  it('retains association refusal for explicit removal and releases its descriptor', async () => {
+    const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
+    const readAttachment = vi.fn().mockResolvedValue({ ok: true, value: { attachment, data: new TextEncoder().encode('note') } })
+    const created = vi.fn((selected: readonly File[]) => [{ id: 'refused-id', file: selected[0] }])
+    const removed = vi.fn()
+    const released = vi.fn()
+    render(<Composer images={[draft]} readAttachment={readAttachment} createDraftImages={created}
+      refuseHydration onRemoveImage={removed} onRelease={released} />)
+    const remove = await screen.findByRole('button', { name: '移除 picture.png' })
+    expect(screen.getByRole('button', { name: '重试恢复 picture.png' })).toBeTruthy()
+    expect(removed).not.toHaveBeenCalled()
+    expect(released).toHaveBeenCalledOnce()
+    expect(released.mock.calls[0]![0][0].id).toBe('refused-id')
+    fireEvent.click(remove)
+    expect(removed).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: '重试恢复 picture.png' })).toBeNull()
+  })
+
+  it('removes a terminal attachment reason without offering retry', async () => {
+    const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
+    const readAttachment = vi.fn().mockResolvedValue({
+      ok: false, error: { code: 'attachment-error', message: 'hidden', details: { reason: 'ATTACHMENT_NOT_FOUND' } },
+    })
+    const removed = vi.fn()
+    render(<Composer images={[draft]} readAttachment={readAttachment} onRemoveImage={removed} />)
+    await waitFor(() => expect(removed).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('button', { name: '重试恢复 picture.png' })).toBeNull()
+  })
+
+  it.each([
+    ['transport throw', new Error('offline')],
+    ['internal response', { ok: false, error: { code: 'internal', message: 'hidden', details: {} } }],
+  ])('retains %s until explicit retry succeeds', async (_label, first) => {
+    const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
+    const readAttachment = vi.fn()
+      .mockImplementationOnce(() => first instanceof Error ? Promise.reject(first) : Promise.resolve(first))
+      .mockResolvedValueOnce({ ok: true, value: { attachment, data: new TextEncoder().encode('note') } })
+    const hydrated = vi.fn()
+    const removed = vi.fn()
+    const created = vi.fn((selected: readonly File[]) => [{ id: 'retry-id', file: selected[0] }])
+    render(<Composer images={[draft]} readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} onRemoveImage={removed} />)
+    const retry = await screen.findByRole('button', { name: '重试恢复 picture.png' })
+    expect(removed).not.toHaveBeenCalled()
+    expect(readAttachment).toHaveBeenCalledOnce()
+    fireEvent.click(retry)
+    await waitFor(() => expect(hydrated).toHaveBeenCalledWith(draft.draft_key, 'retry-id'))
+    expect(readAttachment).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('button', { name: '重试恢复 picture.png' })).toBeNull()
+  })
+
+  it('removes a newly inadmissible persisted ref before reading it', async () => {
+    const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
+    const readAttachment = vi.fn()
+    const removed = vi.fn()
+    render(<Composer images={[draft]} readAttachment={readAttachment} onRemoveImage={removed}
+      limits={{ maxImageBytes: 3, maxImagesPerMessage: 20, maxMessageImageBytes: 100, maxImagePixels: 40_000_000, mediaTypes: ['image/png'] }} />)
+    await waitFor(() => expect(removed).toHaveBeenCalledOnce())
+    expect(readAttachment).not.toHaveBeenCalled()
+  })
+
+  it('hydrates later valid refs when an earlier concurrent read fails', async () => {
+    const secondAttachment = { ...attachment, attachmentId: `sha256:${'b'.repeat(64)}`, name: 'second.png' }
+    const drafts = [
+      { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment },
+      { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000002', attachment: secondAttachment },
+    ]
+    const reads = new Map<string, (value: unknown) => void>()
+    const readAttachment = vi.fn((ref: any) => new Promise(resolve => { reads.set(ref.attachmentId, resolve) }))
+    const hydrated = vi.fn()
+    const removed = vi.fn()
+    const created = vi.fn((selected: readonly File[]) => [{ id: `native-${selected[0]!.name}`, file: selected[0] }])
+    render(<Composer images={drafts} readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} onRemoveImage={removed} />)
+    await waitFor(() => expect(readAttachment).toHaveBeenCalledTimes(2))
+    reads.get(secondAttachment.attachmentId)!({ ok: true, value: { attachment: secondAttachment, data: new TextEncoder().encode('note') } })
+    await waitFor(() => expect(hydrated).toHaveBeenCalledWith(drafts[1]!.draft_key, 'native-second.png'))
+    reads.get(attachment.attachmentId)!({ ok: true, value: { attachment, data: Uint8Array.of(1) } })
+    await waitFor(() => expect(removed).toHaveBeenCalledWith(drafts[0]!.draft_key))
+    expect(hydrated).not.toHaveBeenCalledWith(drafts[0]!.draft_key, expect.anything())
   })
 
   it('registers against the real native slots and preserves child ownership and the native InputBar lifecycle', async () => {
@@ -211,7 +458,17 @@ describe('file import composer lifecycle', () => {
     let lastNativeProps: any
     let live: any
     let finishImport!: (value: unknown) => void
-    const callImport = vi.fn(() => new Promise(resolve => { finishImport = resolve }))
+    let finishStage!: (value: unknown) => void
+    const callImport = vi.fn((_channel: string, endpoint: string) => new Promise(resolve => {
+      if (endpoint === 'stage-images') finishStage = resolve
+      else finishImport = resolve
+    }))
+    const nativeAddImages = vi.fn()
+    const beginImageStage = vi.fn(() => true)
+    const cancelImageStage = vi.fn()
+    const addDurableImages = vi.fn(() => true)
+    const createDraftImages = vi.fn((selected: readonly File[]) => selected.map(value => ({ id: 'typed-native-id', file: value })))
+    const releaseDraftImages = vi.fn()
     const Native = (props: any) => {
       lastNativeProps = props
       return <InputBar {...props} />
@@ -219,12 +476,15 @@ describe('file import composer lifecycle', () => {
     const picked = vi.fn()
     try {
       const shell = new SessionInputShell({ actx: {} as never, defaultSink: vi.fn() })
+      const shellAddImages = vi.spyOn(shell, 'addImages')
       const absentMenu = { getSnapshot: () => null, subscribe: () => () => {} }
       const locale = { revision: 0 }
       runtime.slots.installLocale({ getSnapshot: () => locale, subscribe: () => () => {}, bind: () => (key: string) => key } as never)
       runtime.provide('inputTriggers', { registerSource(source: any) { trigger = source; return () => {} } } as never)
       runtime.provide('connection', { isLoopback: true, rpc: { call: callImport } } as never)
-      runtime.provide('conversation', { input: { for: () => ({ notify: vi.fn() }) }, draftImages: () => [] } as never)
+      runtime.provide('conversation', {
+        input: { for: () => ({ notify: vi.fn() }) }, draftImages: () => [], createDraftImages, releaseDraftImages,
+      } as never)
       await runtime.sessions.add({ id: 'one' }, { current: false })
       await runtime.sessions.add({ id: 'two' }, { current: false })
       await runtime.declare({
@@ -249,7 +509,7 @@ describe('file import composer lifecycle', () => {
         ctx.slots.register({ name: 'conversation.input.plan' }, () => <button>原生计划</button>)
         ctx.slots.register({ name: 'conversation.input.model' }, () => <button>原生模型</button>)
       } })
-      const actions = { ...shell.actions, addFiles: vi.fn(() => true), removeFile: vi.fn() }
+      const actions = { ...shell.actions, addImages: nativeAddImages, beginImageStage, cancelImageStage, addDurableImages, hydrateDurableImage: vi.fn(), removeDurableImage: vi.fn(), addFiles: vi.fn(() => true), removeFile: vi.fn() }
       runtime.renderSlot('conversation.composer.bar' as never, {
         useInput: (select: any) => select(live), inputActions: actions, leftItems: <span>原生工具</span>,
       } as never)
@@ -277,8 +537,22 @@ describe('file import composer lifecycle', () => {
       expect(screen.getByRole('textbox')).toBe(textarea)
       expect(screen.getByRole('button', { name: '原生计划' })).toBeTruthy()
       expect(screen.getByRole('button', { name: '原生模型' })).toBeTruthy()
+      const typed = file('typed.png', 'image/png')
+      expect(lastNativeProps.addImages([typed])).toBeNull()
+      await waitFor(() => expect(callImport.mock.calls.filter(call => call[1] === 'stage-images')).toHaveLength(1))
+      expect(nativeAddImages).not.toHaveBeenCalled()
+      expect(beginImageStage).toHaveBeenCalledOnce()
+      expect(shellAddImages).not.toHaveBeenCalled()
+      finishStage(staged)
+      await waitFor(() => expect(addDurableImages).toHaveBeenCalledOnce())
+      expect(createDraftImages).toHaveBeenCalledOnce()
+      expect(addDurableImages.mock.calls[0]![1]).toEqual(['typed-native-id'])
+      expect(callImport.mock.calls.filter(call => call[1] === 'stage-images')).toHaveLength(1)
+      expect(releaseDraftImages).not.toHaveBeenCalled()
+      expect(cancelImageStage).not.toHaveBeenCalled()
+
       fireEvent.change(picker(), { target: { files: [file()] } })
-      await waitFor(() => expect(callImport).toHaveBeenCalledOnce())
+      await waitFor(() => expect(callImport.mock.calls.filter(call => call[1] === 'import')).toHaveLength(1))
       expect(screen.getByRole('button', { name: `移除 ${imported.display_name}` })).toBeTruthy()
       await runtime.sessions.setCurrent('two')
       // rc.7 SessionMaybeEntry adopts the first session, then remounts on a
