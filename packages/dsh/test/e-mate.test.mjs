@@ -1358,6 +1358,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     } }
     let throwNextImageJobStarter = false
     let imageReviewAsk
+    const recoveryRootSession = { header: { id: 'image-recovery-root' }, events: [],
+      append(type, data, options) { this.events.push({ seq: this.events.length, type, data, options }) } }
+    let sessionCreated
+    let sessionCreatedRegistrations = 0
+    let recoveryFlushes = 0
+    const recoveryBaseline = { requests: requests.length, jobs: jobs.length, policies: policyModels.length }
     const pluginCtx = {
       tools: {
         register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } },
@@ -1416,6 +1422,10 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         coldSnapshot: async () => assert.fail('an empty Session list must not trigger a cold read'),
       },
       sessionPersistence: { list: async () => [] },
+      sessions: {
+        list: () => [recoveryRootSession],
+        async flush() { recoveryFlushes += 1; return true },
+      },
       sandboxPolicy: { resolve: () => ({ mode: sandboxMode, workspaceRoot: temporary }) },
       get(name) {
         requestedServices.push(name)
@@ -1433,8 +1443,16 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         return cleanup
       },
       on(name, listener) {
-        if (name === 'agent/pre-step') preStep = listener
-        else assert.fail(`unexpected image-generation listener ${name}`)
+        if (name === 'agent/pre-step') {
+          assert.equal(preStep, undefined)
+          preStep = listener
+        } else if (name === 'session/created') {
+          assert.equal(sessionCreated, undefined)
+          sessionCreated = listener
+          sessionCreatedRegistrations += 1
+        } else {
+          assert.fail(`unexpected image-generation listener ${name}`)
+        }
         return () => {}
       },
     }
@@ -1442,6 +1460,18 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       bindingPath,
       rootUrl: 'https://model.example/e-mate/model-api/v1',
     })
+    assert.equal(sessionCreatedRegistrations, 1)
+    assert.equal(typeof sessionCreated, 'function')
+    assert.equal(recoveryRootSession.events.length, 0)
+    assert.equal(recoveryFlushes, 0)
+    assert.deepEqual({ requests: requests.length, jobs: jobs.length, policies: policyModels.length }, recoveryBaseline)
+    const restoredNoBatch = { header: { id: 'restored-no-batch' }, events: [{ seq: 0, type: 'emate/image-output', data: { schema_version: 2 } }],
+      append(type, data, options) { this.events.push({ seq: this.events.length, type, data, options }) } }
+    sessionCreated(restoredNoBatch)
+    await new Promise(resolveImmediate => setImmediate(resolveImmediate))
+    assert.equal(restoredNoBatch.events.length, 1)
+    assert.equal(recoveryFlushes, 0)
+    assert.deepEqual({ requests: requests.length, jobs: jobs.length, policies: policyModels.length }, recoveryBaseline)
     assert.deepEqual([...tools.keys()], ['imagegen', 'image_batch', 'image_pack'])
     assert.equal(imageProjectionDefinitions.length, 2)
     assert.equal(imageProjectionDefinitions[1].key, 'eMateImageBatches')
