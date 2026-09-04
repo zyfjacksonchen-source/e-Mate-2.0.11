@@ -869,12 +869,17 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-304",
       "write_set": [
         "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.tsx",
-        "packages/dsh/profile/plugins/emate-shell/tests/**"
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.module.css",
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
+        "packages/dsh/profile/plugins/emate-shell/src/client/index.ts",
+        "packages/dsh/profile/plugins/emate-shell/tests/image-batch-progress.client.spec.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+        "docs/2.0.17/work-orders.json"
       ],
       "implementation": [
         "失败卡片显示可理解原因，不用 toast 取代内联状态。",
-        "自动重试只由 gateway 安全策略执行；用户可点击“重新生成此项”创建新的 task/request ID，明确表示新生成。",
-        "整批取消停止 queued 项，保留已完成图。",
+        "自动重试只由 gateway 安全策略执行；用户可点击“准备重新生成此项”把同一 logged task prompt 放入空闲空白输入框，确认发送后才由 Agent Loop 创建全新调用与 ID。",
+        "批次 UI 不创建取消请求；开放批次明确引导使用 composer 的既有 Stop action/parent AbortSignal，已完成图继续保留。",
         "unknown 明确告知“结果不确定，未自动重复生成”。"
       ],
       "acceptance": [
@@ -882,10 +887,10 @@
         "用户重试不会伪装成原任务继续，也不会覆盖旧成功图。"
       ],
       "tests": [
-        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/image-batch-client.client.spec.tsx tests/image-batch-progress.client.spec.tsx tests/image-gallery.client.spec.tsx (from packages/dsh/profile/plugins/emate-shell)",
         "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
       ],
-      "rollback": "隐藏新操作按钮；原始结果仍可见。",
+      "rollback": "移除 retry draft 按钮、logged-args Turn data 与 composer callback；EM303 状态、图片和摘要保留。",
       "risk": "中"
     },
     {

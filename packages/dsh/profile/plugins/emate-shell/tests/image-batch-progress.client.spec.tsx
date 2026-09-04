@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useRef, useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProjectionValueStore } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/projection-store.ts'
 import type { SessionListState, UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import { useImageBatchProjection } from '../src/client/image-batch-client.ts'
-import { ImageBatchProgress } from '../src/client/image-batch-progress.tsx'
+import {
+  ImageBatchProgress,
+  type ImageBatchRetryCall,
+  type ImageBatchRetryResult,
+  type ImageBatchRetryTask,
+} from '../src/client/image-batch-progress.tsx'
 import { ArtifactTerminal, imageCallsDefinition, selectArtifactTerminal } from '../src/client/image-gallery.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
@@ -146,11 +151,21 @@ function projectedSessions(statuses: readonly ('completed' | 'needs-review' | 'f
   return { ...emptySessions(), byId } as never
 }
 
-function renderProgress(store: ProjectionValueStore, sessions = sessionHarness(emptySessions()), loadImage = vi.fn(async () => 'blob:image')) {
+function renderProgress(
+  store: ProjectionValueStore,
+  sessions = sessionHarness(emptySessions()),
+  loadImage = vi.fn(async () => 'blob:image'),
+  retry: {
+    retryCalls?: readonly ImageBatchRetryCall[]
+    prepareRetry?: (task: ImageBatchRetryTask) => Promise<ImageBatchRetryResult>
+  } = {},
+) {
   function Owner() {
     const view = useImageBatchProjection(useProjectionFrom(store), parentSessionId)
     return <ImageBatchProgress
       batches={view.batches.filter(batch => batch.parentCallId === parentCallId)}
+      {...retry.retryCalls === undefined ? {} : { retryCalls: retry.retryCalls }}
+      {...retry.prepareRetry === undefined ? {} : { prepareRetry: retry.prepareRetry }}
       useSessions={sessions.useSessions}
       loadImage={loadImage}
     />
@@ -163,15 +178,28 @@ describe('live image batch progress', () => {
   it('binds only image_batch calls to an open Turn tail while preserving legacy imagegen closure', () => {
     const start = { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }
     const initial = imageCallsDefinition.start({} as never, { event: start } as never, {} as never)
+    const sourceId = 'sha256:' + '7'.repeat(64)
+    const loggedTasks = [
+      { prompt: ' 第一张海报 ', image_url: [] },
+      { prompt: '修改参考图', image_url: [sourceId, sourceId] },
+    ]
     const call = { type: 'tool/call', seq: 2, time: 2, data: {
-      turn: 1, step: 1, callId: parentCallId, name: 'image_batch', arguments: '{}',
+      turn: 1, step: 1, callId: parentCallId, name: 'image_batch',
+      arguments: JSON.stringify({ tasks: loggedTasks, concurrency: 3 }),
     } }
     expect(imageCallsDefinition.match(call as never)).toEqual({ id: '1', role: 'update' })
     const state = imageCallsDefinition.update({ state: initial } as never, { event: call } as never)
-    expect(state.batchCalls).toEqual([{ callId: parentCallId, seq: 2 }])
+    expect(state.batchCalls).toEqual([{
+      callId: parentCallId, seq: 2, retryTasks: [
+        { ordinal: 1, prompt: '第一张海报', imageIds: [] },
+        { ordinal: 2, prompt: '修改参考图', imageIds: [sourceId] },
+      ],
+    }])
     const owner = { turn: { turn: 1, status: 'open', data: { get: () => state }, steps: [] }, nodes: [], seq: 2 }
     expect(selectArtifactTerminal(owner as never)).toEqual({
-      callIds: [], batchCallIds: [parentCallId], paths: [], childSessionIds: [],
+      callIds: [], batchCallIds: [parentCallId], batchRetryCalls: [{
+        parentCallId, tasks: state.batchCalls![0]!.retryTasks!,
+      }], paths: [], childSessionIds: [],
     })
     expect(selectArtifactTerminal({ ...owner, turn: { ...owner.turn, data: { get: () => ({ calls: [] }) } } } as never)).toBeNull()
   })
@@ -189,6 +217,8 @@ describe('live image batch progress', () => {
     store.apply('eMateImageBatches', projection(['queued', 'queued']), 1)
     const view = renderProgress(store)
     expect(projectionSubscriptions).toBe(1)
+    expect(screen.getByText('如需取消，请使用输入框旁的“停止生成”按钮。')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /取消/u })).toBeNull()
     const first = screen.getByRole('article', { name: '第 1 张图片：排队中' })
     const second = screen.getByRole('article', { name: '第 2 张图片：排队中' })
     expect(screen.getAllByRole('listitem')).toHaveLength(2)
@@ -375,6 +405,47 @@ describe('live image batch progress', () => {
     )))
     expect(screen.getByLabelText('图片批次，共 2 张，' + label).getAttribute('aria-busy')).toBe('false')
     expect(screen.queryAllByRole('region', { name: '批次未完成项目：' + count + ' 项' })).toHaveLength(count === 0 ? 0 : 1)
+    view.unmount()
+  })
+
+  it('prepares a fresh retry draft from the exact logged task without reusing control IDs', async () => {
+    const store = new ProjectionValueStore()
+    store.apply('eMateImageBatches', projection(['failed', 'completed'], { revisions: [3, 3], terminal: true }), 1)
+    const prepareRetry = vi.fn(async () => ({
+      prepared: true, message: '已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。',
+    }))
+    const retryTask = { ordinal: 1, prompt: '精确原始提示', imageIds: [] }
+    const view = renderProgress(store, sessionHarness(projectedSessions(['failed', 'completed'])), undefined, {
+      retryCalls: [{ parentCallId, tasks: [retryTask] }], prepareRetry,
+    })
+    const button = screen.getByRole('button', { name: '准备重新生成此项' })
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    fireEvent.keyDown(button, { key: 'Enter' })
+    fireEvent.click(button)
+    await waitFor(() => { expect(prepareRetry).toHaveBeenCalledWith(retryTask) })
+    expect(prepareRetry.mock.calls[0]?.[0]).toEqual({ ordinal: 1, prompt: '精确原始提示', imageIds: [] })
+    expect(JSON.stringify(prepareRetry.mock.calls[0]?.[0])).not.toMatch(/batch_id|task_id|client_request_id|child_session_id/u)
+    expect(screen.getByText('已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^查看原图：/u })).toBeTruthy()
+    view.unmount()
+  })
+
+  it('disables source-image retry without mutating attachments and explains unknown outcomes', () => {
+    const store = new ProjectionValueStore()
+    store.apply('eMateImageBatches', projection(['unknown', 'completed'], { revisions: [3, 3], terminal: true }), 1)
+    const prepareRetry = vi.fn()
+    const sourceId = 'sha256:' + '7'.repeat(64)
+    const view = renderProgress(store, sessionHarness(projectedSessions(['failed', 'completed'])), undefined, {
+      retryCalls: [{ parentCallId, tasks: [{ ordinal: 1, prompt: '参考图任务', imageIds: [sourceId] }] }],
+      prepareRetry,
+    })
+    expect(screen.getByText('结果不确定，未自动重复生成')).toBeTruthy()
+    const button = screen.getByRole('button', { name: '准备重新生成此项' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(screen.getByText('带参考图的任务暂不能安全准备重试，请重新附图后发送。')).toBeTruthy()
+    fireEvent.click(button)
+    expect(prepareRetry).not.toHaveBeenCalled()
     view.unmount()
   })
 

@@ -165,6 +165,8 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
   const pendingReads: Array<(result: unknown) => void> = []
   const drafts = new Map<string, { id: string; file: File }>()
   let imageIds: readonly string[] = []
+  let draft = ''
+  let phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting' = 'plain'
   let injected: any
   const readAttachment = vi.fn(() => new Promise(resolve => { pendingReads.push(resolve) }))
   const addImages = vi.fn((ids: readonly string[]) => {
@@ -176,7 +178,8 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     for (const image of images) drafts.delete(image.id)
   })
   const shell = {
-    state: { getSnapshot: () => ({ imageIds, phase: 'plain' }) },
+    state: { getSnapshot: () => ({ draft, imageIds, phase }) },
+    setDraft: vi.fn((value: string) => { draft = value }),
     addImages,
     notify: vi.fn(),
   }
@@ -195,6 +198,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     sessions: {
       binding,
       scope: () => ({}),
+      open: vi.fn(),
     },
     conversation: {
       resolveImage: vi.fn(async () => 'blob:image'),
@@ -222,6 +226,11 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     shell,
     notice,
     imageIds: () => imageIds,
+    setImageIds: (value: readonly string[]) => { imageIds = value },
+    draft: () => draft,
+    setDraft: (value: string) => { draft = value },
+    setPhase: (value: typeof phase) => { phase = value },
+    openSession: ctx.sessions.open,
     draftCount: () => drafts.size,
     resolveReads: () => {
       for (const resolveRead of pendingReads.splice(0)) {
@@ -245,6 +254,48 @@ describe('completed artifact terminal', () => {
     })
     expect(entries[0]?.component).toBe(ImageGalleryView)
     await runtime.dispose()
+  })
+
+  it('prepares exact new-image retry text without overwriting or submitting composer input', async () => {
+    const retry = { ordinal: 2, prompt: '保留原始构图并使用蓝色背景', imageIds: [] }
+    const ready = galleryAdmissionHarness(limits)
+    expect(await ready.injected.prepareImageRetry(retry)).toEqual({
+      prepared: true,
+      message: '已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。',
+    })
+    expect(ready.draft()).toBe('请重新生成一张图片，要求如下：\n保留原始构图并使用蓝色背景')
+    expect(ready.draft()).not.toMatch(/batch|task|client_request|sha256:/u)
+    expect(ready.openSession).toHaveBeenCalledWith('session-gallery')
+
+    const occupied = galleryAdmissionHarness(limits)
+    occupied.setDraft('用户现有草稿')
+    expect(await occupied.injected.prepareImageRetry(retry)).toEqual({
+      prepared: false, message: '输入框已有内容或图片，未覆盖现有草稿。',
+    })
+    expect(occupied.draft()).toBe('用户现有草稿')
+    expect(occupied.openSession).not.toHaveBeenCalled()
+
+    const occupiedByImage = galleryAdmissionHarness(limits)
+    occupiedByImage.setImageIds([attachment.attachmentId])
+    expect(await occupiedByImage.injected.prepareImageRetry(retry)).toEqual({
+      prepared: false, message: '输入框已有内容或图片，未覆盖现有草稿。',
+    })
+    expect(occupiedByImage.imageIds()).toEqual([attachment.attachmentId])
+    expect(occupiedByImage.draft()).toBe('')
+
+    const busy = galleryAdmissionHarness(limits)
+    busy.setPhase('claimed')
+    expect(await busy.injected.prepareImageRetry(retry)).toEqual({
+      prepared: false, message: '当前输入正在处理中，请稍后再准备。',
+    })
+    expect(busy.draft()).toBe('')
+
+    const referenced = galleryAdmissionHarness(limits)
+    expect(await referenced.injected.prepareImageRetry({ ...retry, imageIds: [attachment.attachmentId] })).toEqual({
+      prepared: false, message: '带参考图的任务暂不能安全准备重试，请重新附图后发送。',
+    })
+    expect(referenced.draft()).toBe('')
+    expect(referenced.openSession).not.toHaveBeenCalled()
   })
 
   it('uses the native overlay Toast transiently without changing composer layout', () => {
@@ -982,7 +1033,8 @@ describe('completed artifact terminal', () => {
     const source = readFileSync(resolve('src/client/image-gallery.tsx'), 'utf8')
     const contract = readFileSync(resolve('src/client/image-gallery-contract.ts'), 'utf8')
     expect(source).not.toMatch(/querySelector|createPortal|MutationObserver|setInterval/u)
-    expect(source).not.toMatch(/gpt-image|provider|prompt/u)
+    expect(source).not.toMatch(/gpt-image|provider/u)
+    expect(source).toContain('imageBatchRetryTasks(match.event.data.arguments)')
     expect(source).toContain('subagentsByParent')
     expect(source.match(/child_session_id/gu)).toHaveLength(1)
     expect(source).toContain('row.receipt.child_session_id !== undefined')

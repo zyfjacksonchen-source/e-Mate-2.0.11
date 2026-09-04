@@ -33,7 +33,12 @@ import {
   type ImageGalleryItem,
 } from './image-gallery-contract.ts'
 import { useImageBatchProjection, type ImageBatchClientBatch } from './image-batch-client.ts'
-import { ImageBatchProgress } from './image-batch-progress.tsx'
+import {
+  ImageBatchProgress,
+  type ImageBatchRetryCall,
+  type ImageBatchRetryResult,
+  type ImageBatchRetryTask,
+} from './image-batch-progress.tsx'
 import css from './image-gallery.module.css'
 
 interface ToolImagesData {
@@ -47,7 +52,38 @@ interface ToolImagesState extends ToolImagesData {
 interface ImageCallsTurnData {
   readonly calls: readonly { readonly callId: string; readonly seq: number }[]
   readonly foregroundSubagents: readonly { readonly seq: number; readonly label: string }[]
-  readonly batchCalls?: readonly { readonly callId: string; readonly seq: number }[]
+  readonly batchCalls?: readonly {
+    readonly callId: string
+    readonly seq: number
+    readonly retryTasks?: readonly ImageBatchRetryTask[]
+  }[]
+}
+
+const IMAGE_BATCH_ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
+
+function imageBatchRetryTasks(value: string): readonly ImageBatchRetryTask[] | undefined {
+  let args: unknown
+  try { args = JSON.parse(value) } catch { return undefined }
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return undefined
+  const input = args as Record<string, unknown>
+  const keys = Object.keys(input)
+  if (!Array.isArray(input.tasks) || input.tasks.length < 2 || input.tasks.length > 8
+    || keys.some(key => key !== 'tasks' && key !== 'concurrency')
+    || input.concurrency !== undefined && (!Number.isSafeInteger(input.concurrency)
+      || Number(input.concurrency) < 1 || Number(input.concurrency) > 4)) return undefined
+  const tasks: ImageBatchRetryTask[] = []
+  for (const [index, value] of input.tasks.entries()) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const task = value as Record<string, unknown>
+    if (Object.keys(task).some(key => key !== 'prompt' && key !== 'image_url')
+      || typeof task.prompt !== 'string') return undefined
+    const prompt = task.prompt.trim()
+    const rawIds = task.image_url === undefined ? [] : Array.isArray(task.image_url) ? task.image_url : [task.image_url]
+    if (prompt.length === 0 || prompt.length > 20_000 || prompt.includes('\0') || rawIds.length > 16
+      || rawIds.some(id => typeof id !== 'string' || !IMAGE_BATCH_ATTACHMENT_ID.test(id))) return undefined
+    tasks.push(Object.freeze({ ordinal: index + 1, prompt, imageIds: Object.freeze([...new Set(rawIds as string[])]) }))
+  }
+  return Object.freeze(tasks)
 }
 
 interface ImageCallsState extends ImageCallsTurnData {
@@ -147,9 +183,15 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
     if (match.event.type !== 'tool/call') return context.state
     if (match.event.data.name === 'image_batch') {
       const callId = String(match.event.data.callId)
+      const retryTasks = imageBatchRetryTasks(match.event.data.arguments)
       return context.state.batchCalls?.some(call => call.callId === callId)
         ? context.state
-        : { ...context.state, batchCalls: [...context.state.batchCalls ?? [], { callId, seq: match.event.seq }] }
+        : {
+            ...context.state,
+            batchCalls: [...context.state.batchCalls ?? [], {
+              callId, seq: match.event.seq, ...retryTasks === undefined ? {} : { retryTasks },
+            }],
+          }
     }
     if (match.event.data.name === 'subagent') {
       let args: unknown
@@ -227,6 +269,7 @@ interface ProducedData {
 export interface ArtifactTerminalMatch {
   readonly callIds: readonly string[]
   readonly batchCallIds?: readonly string[]
+  readonly batchRetryCalls?: readonly ImageBatchRetryCall[]
   readonly paths: readonly string[]
   readonly childSessionIds: readonly string[]
   readonly foregroundWindow?: {
@@ -239,14 +282,21 @@ export interface ArtifactTerminalMatch {
 /** Claim one live batch tail, or the legacy artifact terminal after its Turn closes. */
 export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTerminalMatch | null {
   const imageData = owner.turn.data.get('e-mate-image-calls')
-  const batchCallIds = [...new Set((imageData?.batchCalls ?? [])
+  const batchCalls = (imageData?.batchCalls ?? [])
     .filter(call => call.seq <= owner.seq)
     .sort((left, right) => left.seq - right.seq)
-    .map(call => call.callId))]
+  const batchCallIds = [...new Set(batchCalls.map(call => call.callId))]
+  const batchRetryCalls = batchCalls.flatMap(call => call.retryTasks === undefined
+    ? []
+    : [{ parentCallId: call.callId, tasks: call.retryTasks }])
   if (owner.turn.status !== 'closed') {
     return batchCallIds.length === 0
       ? null
-      : { callIds: [], batchCallIds, paths: [], childSessionIds: [] }
+      : {
+          callIds: [], batchCallIds,
+          ...batchRetryCalls.length === 0 ? {} : { batchRetryCalls },
+          paths: [], childSessionIds: [],
+        }
   }
   const candidates = (imageData?.calls ?? []).filter(call => call.seq <= owner.seq)
   const produced = (owner.turn.data as { get(key: string): unknown }).get('deliverables') as ProducedData | undefined
@@ -276,6 +326,7 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
     : {
         callIds,
         ...batchCallIds.length === 0 ? {} : { batchCallIds },
+        ...batchRetryCalls.length === 0 ? {} : { batchRetryCalls },
         paths,
         childSessionIds,
         ...foregroundWindow === undefined ? {} : { foregroundWindow },
@@ -544,6 +595,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
   readonly useInput: <T>(selector: (input: InputSnapshot) => T) => T
   readonly useProjection: UseProjection
   readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
+  readonly prepareImageRetry?: (task: ImageBatchRetryTask) => Promise<ImageBatchRetryResult>
   readonly addImageToDraft: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly draftBytes: (ids: readonly string[]) => number
   readonly notify: (level: 'info' | 'error', text: string) => void
@@ -941,7 +993,7 @@ export function ArtifactTerminal(props: ArtifactTerminalProps) {
 /** Render hidden image receipts, native deliverables, and optional exact batch progress. */
 function ArtifactTerminalBody({
   matched, sessionId, turn, useSession, useSessions, useInput, useProjection,
-  openFile, loadImage, addImageToDraft, draftBytes, notify, runResource, batches, batchReceipts,
+  openFile, loadImage, prepareImageRetry, addImageToDraft, draftBytes, notify, runResource, batches, batchReceipts,
 }: ArtifactTerminalBodyProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -1047,6 +1099,8 @@ function ArtifactTerminalBody({
   return <div ref={rootRef} className={css.terminal} data-emate-artifact-terminal="">
     {batches.length > 0 && <ImageBatchProgress
       batches={batches}
+      {...matched.batchRetryCalls === undefined ? {} : { retryCalls: matched.batchRetryCalls }}
+      {...prepareImageRetry === undefined ? {} : { prepareRetry: prepareImageRetry }}
       useSessions={useSessions}
       loadImage={loadImage}
     />}

@@ -76,6 +76,52 @@
   font-size: 12px;
 }
 
+.reason,
+.cancelGuidance,
+.retry p {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.reason,
+.retry {
+  padding: 0 10px 10px;
+}
+
+.cancelGuidance {
+  margin-bottom: 8px;
+}
+
+.retry {
+  display: grid;
+  gap: 6px;
+}
+
+.retry button {
+  width: fit-content;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.retry button:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: 2px;
+}
+
+.retry button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .failures {
   display: grid;
   gap: 4px;
