@@ -173,7 +173,7 @@
       "behavior": "macOS Computer Use keeps immutable universal helper, projects permission/readiness, and expires authorization before the next direct request.",
       "preconditions": "macOS app-directory/dev candidate and OS permissions.",
       "evidenceOwner": "automated-test",
-      "evidence": "packages/dsh-plugin-computer-use/test/contract.test.mjs :: computer-use adapter preserves the immutable universal helper only on macOS",
+      "evidence": "packages/dsh-plugin-computer-use/test/contract.test.mjs :: computer-use adapter preserves Darwin and adds one pinned Windows backend",
       "evidenceFile": "packages/dsh-plugin-computer-use/test/contract.test.mjs"
     },
     {
@@ -859,7 +859,7 @@
       "behavior": "Truthful gap: 2.0.16 native Windows Computer Use is unavailable and must not claim ready or ship a substitute helper.",
       "preconditions": "Windows 2.0.16 Profile.",
       "evidenceOwner": "automated-test",
-      "evidence": "packages/dsh-plugin-computer-use/test/contract.test.mjs :: computer-use adapter preserves the immutable universal helper only on macOS",
+      "evidence": "packages/dsh-plugin-computer-use/test/contract.test.mjs :: computer-use adapter preserves Darwin and adds one pinned Windows backend",
       "evidenceFile": "packages/dsh-plugin-computer-use/test/contract.test.mjs"
     }
   ]
