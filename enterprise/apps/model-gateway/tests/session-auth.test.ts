@@ -72,8 +72,11 @@ test('rejects tampering, algorithm confusion, wrong scope and invalid lifetime',
   assert.equal(await authenticate(token({ aud: 'other-service' })), null);
   assert.equal(await authenticate(token({ scopes: ['models:read'] })), null);
   assert.equal(await authenticate(token({ unexpected: true })), null);
-  assert.equal(await authenticate(token({ exp: Math.floor(now / 1_000) - 1 })), null);
-  assert.equal(await authenticate(token({ exp: Math.floor(now / 1_000) + 901 })), null);
+  const nowSeconds = Math.floor(now / 1_000);
+  assert.notEqual(await authenticate(token({ iat: nowSeconds - 599, nbf: nowSeconds - 599, exp: nowSeconds + 1 })), null);
+  assert.equal(await authenticate(token({ iat: nowSeconds - 600, nbf: nowSeconds - 600, exp: nowSeconds })), null);
+  assert.equal(await authenticate(token({ exp: nowSeconds - 1 })), null);
+  assert.equal(await authenticate(token({ exp: nowSeconds + 901 })), null);
   assert.equal(await authenticate(token({ nbf: Math.floor(now / 1_000) + 61 })), null);
   assert.equal(await authenticate(token({ modelIds: ['e-mate-faux'] })), null);
   assert.equal(await authenticate(token({ modelIds: ['gpt-5.6-sol', 'gpt-5.6-sol'] })), null);

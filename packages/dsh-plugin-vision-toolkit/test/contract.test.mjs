@@ -56,7 +56,7 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
     readFile(new URL('lib/client.js', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  assert.equal(pkg.version, '2.0.16')
+  assert.equal(pkg.version, '2.0.17')
   assert.equal(pkg.dsh.visionToolkit.adapterState, 'managed')
   assert.equal(pkg.dsh.visionToolkit.upstreamCommit, 'bc9803d7d6300c864d17460ecbb33540b26638e0')
   assert.equal(pkg.dsh.upstream.commit, '29850a83871d4b7a7cc13e251420c5a440e2f69e')
@@ -253,7 +253,7 @@ test('mixed PNG, PDF and DOCX follows the real native-drop and File Import menti
     { relative_path: '.e-mate/imports/资料.pdf' },
     { relative_path: '.e-mate/imports/文档.docx' },
   ]), '请结合海报阅读 @.e-mate/imports/资料.pdf @.e-mate/imports/文档.docx ')
-  assert.match(client, /if \(images\.length > 0\) dropImages\(images\)[\s\S]*if \(ordinary\.length > 0\) void importFiles\(ordinary\)/u)
+  assert.match(client, /if \(images\.length > 0\) \{\s+const message = await stageImageFiles\(images\)\s+if \(message !== null && current\(\)\) setRows\(currentRows => \[\.\.\.currentRows, \.\.\.errorRows\(images, message\)\]\)\s+\}\s+if \(ordinary\.length > 0\) await importFiles\(ordinary\)/u)
 })
 
 targetTest('Vision ships one signed offline CPython wheel closure for the selected target', async () => {

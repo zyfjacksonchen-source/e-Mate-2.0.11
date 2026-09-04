@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-file-import",
-  "version": "2.0.16",
+  "version": "2.0.17",
   "description": "Session-bound local file import for the e-Mate DSH composer.",
   "type": "module",
   "main": "lib/index.js",
@@ -20,7 +20,9 @@
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
-    "test": "node --test test/*.test.mjs",
+    "test:source": "node --test test/*.test.mjs",
+    "test:client": "cd ../../upstream/deepseek-harness && node_modules/.bin/vitest run --root ../.. --config packages/dsh/profile/plugins/emate-shell/vitest.config.ts packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx",
+    "test": "pnpm test:source && pnpm test:client",
     "check": "pnpm build && pnpm test"
   },
   "dsh": {

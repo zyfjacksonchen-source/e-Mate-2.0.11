@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import React from 'react'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AccountSettings } from '../src/client/account.tsx'
+import { AccountControl, AccountSettings } from '../src/client/account.tsx'
 import { HomeProjection } from '../src/client/home.tsx'
 import type { IdentityBootstrap, RpcResult } from '../src/client/identity.tsx'
 
@@ -26,6 +26,60 @@ afterEach(() => {
 })
 
 describe('T11 account and compact Home integration', () => {
+  it.each(['authenticated', 'signed-out', 'rejected'] as const)('keeps both account views pending until bootstrap is %s', async outcome => {
+    let resolve!: (result: RpcResult) => void
+    let reject!: (error: Error) => void
+    const pending = new Promise<RpcResult>((done, fail) => { resolve = done; reject = fail })
+    const callIdentity = vi.fn((endpoint: string): Promise<RpcResult> => endpoint === 'identity.bootstrap'
+      ? pending
+      : Promise.resolve({ ok: false, error: { message: '用量暂不可用' } }))
+    render(<>
+      <AccountControl callIdentity={callIdentity} wide UserIcon={() => <svg />} expandSidebar={() => {}} />
+      <AccountSettings callIdentity={callIdentity} />
+    </>)
+
+    expect(screen.getByLabelText('用户中心，正在同步账号状态…')).toBeTruthy()
+    expect(screen.getAllByText('正在同步账号状态…')).toHaveLength(2)
+    expect(screen.queryByLabelText('用户中心，未登录')).toBeNull()
+    expect(screen.queryByText('需要登录')).toBeNull()
+    expect(screen.queryByText(/模型任务已暂停/u)).toBeNull()
+    expect(screen.queryByText('请完成企业登录后再修改密码。')).toBeNull()
+    expect(screen.queryByLabelText('当前密码')).toBeNull()
+    expect(callIdentity).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      if (outcome === 'rejected') reject(new Error('企业身份服务暂不可用。'))
+      else resolve({
+        ok: true,
+        value: outcome === 'authenticated' ? signedIn : {
+          schema_version: 1, ready: true, authenticated: false, workspace_unlocked: false,
+          agreements: signedIn.agreements,
+        },
+      })
+    })
+
+    expect(screen.queryByText('正在同步账号状态…')).toBeNull()
+    if (outcome === 'authenticated') {
+      expect(screen.getByLabelText('用户中心，真实测试账户')).toBeTruthy()
+      expect(screen.getAllByText('真实测试账户')).toHaveLength(2)
+      expect(screen.getByLabelText('当前密码')).toBeTruthy()
+    } else if (outcome === 'signed-out') {
+      expect(screen.getByLabelText('用户中心，未登录')).toBeTruthy()
+      expect(screen.getByText('需要登录')).toBeTruthy()
+      expect(screen.getByText(/模型任务已暂停/u)).toBeTruthy()
+      expect(screen.getByText('请完成企业登录后再修改密码。')).toBeTruthy()
+      expect(screen.queryByLabelText('当前密码')).toBeNull()
+    } else {
+      expect(screen.getByLabelText('用户中心，账号状态暂不可用')).toBeTruthy()
+      expect(screen.getAllByText('企业身份服务暂不可用。')).toHaveLength(2)
+      expect(screen.queryByLabelText('用户中心，未登录')).toBeNull()
+      expect(screen.queryByText('需要登录')).toBeNull()
+      expect(screen.queryByText(/模型任务已暂停/u)).toBeNull()
+      expect(screen.queryByText('请完成企业登录后再修改密码。')).toBeNull()
+      expect(screen.queryByLabelText('当前密码')).toBeNull()
+    }
+  })
+
   it('shows the authoritative account/quota and requests activity only after authenticated bootstrap', async () => {
     const callIdentity = vi.fn(async (endpoint: string, payload: Record<string, unknown>): Promise<RpcResult> => {
       if (endpoint === 'identity.bootstrap') return { ok: true, value: signedIn }

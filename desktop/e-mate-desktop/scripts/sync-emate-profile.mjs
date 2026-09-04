@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { syncEmatePluginBundles } from '../../../scripts/sync-emate-plugin-bundles.mjs'
+import { adaptNavigationSource, NAVIGATION_PACKAGE } from '../../../scripts/harness-conversation-adapter.mjs'
 
 const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const repositoryRoot = resolve(desktopRoot, '..', '..')
@@ -17,7 +18,7 @@ if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/u.test(version)) {
   throw new Error('sync-emate-profile: desktop package version must be a stable semantic version')
 }
 const ecosystemPlugins = [
-  '@kelearns/dsh-navigation-bar',
+  NAVIGATION_PACKAGE,
   'dsh-at-file',
   'dsh-file-viewer',
   'dsh-visualize',
@@ -56,6 +57,10 @@ for (const name of ecosystemPlugins) {
       return !(parts[0] === 'node_modules' && parts[1] === 'node-pty' && parts[2] === 'build')
     },
   })
+  if (name === NAVIGATION_PACKAGE) {
+    const client = join(destination, 'ecosystem', name, 'lib', 'client.js')
+    await writeFile(client, adaptNavigationSource(await readFile(client, 'utf8')))
+  }
 }
 
 const registry = JSON.parse(await readFile(join(destination, 'bundles', 'registry.json'), 'utf8'))

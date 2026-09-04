@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh",
-  "version": "2.0.16",
-  "description": "e-Mate 2.0.16 local browser runtime and lifecycle CLI",
+  "version": "2.0.17",
+  "description": "e-Mate 2.0.17 local browser runtime and lifecycle CLI",
   "type": "module",
   "license": "MIT",
   "publishConfig": {

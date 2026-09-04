@@ -81,6 +81,11 @@ async function bootstrap(callIdentity: Props['callIdentity']): Promise<IdentityB
   return result.value
 }
 
+function identityLabel(state: IdentityBootstrap | null, error: string | null, signedOutLabel: string): string {
+  if (state === null) return error === null ? '正在同步账号状态…' : '账号状态暂不可用'
+  return state.display_name ?? (state.authenticated ? '已登录账号' : signedOutLabel)
+}
+
 function validUsage(value: unknown): value is AccountUsage {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const usage = value as Partial<AccountUsage>
@@ -99,6 +104,7 @@ function validUsage(value: unknown): value is AccountUsage {
 
 export function AccountControl({ callIdentity, wide, placement = 'sidebar', UserIcon, expandSidebar }: AccountControlProps) {
   const [state, setState] = useState<IdentityBootstrap | null>(null)
+  const [identityError, setIdentityError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -107,9 +113,10 @@ export function AccountControl({ callIdentity, wide, placement = 'sidebar', User
   const details = useRef<HTMLDetailsElement>(null)
   const logoutRequestId = useRef<string | null>(null)
   const unlimited = state?.weekly_token_limit === Number.MAX_SAFE_INTEGER
+  const label = identityLabel(state, identityError, '未登录')
 
   useEffect(() => {
-    void bootstrap(callIdentity).then(setState).catch(() => {})
+    void bootstrap(callIdentity).then(setState).catch(error => { setIdentityError(message(error)) })
   }, [callIdentity])
 
   const loadUsage = async () => {
@@ -180,7 +187,7 @@ export function AccountControl({ callIdentity, wide, placement = 'sidebar', User
       }
     }}>
       <summary
-        aria-label={`用户中心，${state?.display_name ?? (state?.authenticated ? '已登录账号' : '未登录')}`}
+        aria-label={`用户中心，${label}`}
         onClick={event => {
           if (!wide && placement === 'sidebar') {
             event.preventDefault()
@@ -193,7 +200,7 @@ export function AccountControl({ callIdentity, wide, placement = 'sidebar', User
       </summary>
       {(wide || placement === 'header') && (
         <div className={css.accountPanel}>
-          <strong>{state?.display_name ?? (state?.authenticated ? '已登录账号' : '未登录')}</strong>
+          <strong>{label}</strong>
           {state?.authenticated && state.weekly_token_limit !== undefined ? (
             <div className={css.usage}>
               <span>本周用量</span>
@@ -214,7 +221,7 @@ export function AccountControl({ callIdentity, wide, placement = 'sidebar', User
               setConfirming(true)
               details.current?.removeAttribute('open')
             }}>退出登录</button>
-          ) : <p>登录状态由企业身份服务提供。</p>}
+          ) : <p role={identityError ? 'status' : undefined}>{identityError ?? '登录状态由企业身份服务提供。'}</p>}
         </div>
       )}
     </details>
@@ -333,14 +340,14 @@ export function AccountSettings({ callIdentity }: Props) {
       {avatarError ? <p className={`${css.note} ${css.error}`} role="status">{avatarError}</p> : null}
       <div className={css.identityRow}>
         <div>
-          <strong>{state?.display_name ?? (state?.authenticated ? '已登录账号' : '需要登录')}</strong>
-          <p>{state?.authenticated ? '企业账户状态已验证' : '模型任务已暂停，本地会话和产物仍会保留。'}</p>
+          <strong>{identityLabel(state, status, '需要登录')}</strong>
+          {state !== null && <p>{state.authenticated ? '企业账户状态已验证' : '模型任务已暂停，本地会话和产物仍会保留。'}</p>}
         </div>
       </div>
-      <p className={css.note}>
+      <p className={css.note} role={state === null && status ? 'status' : undefined}>
         {state?.authenticated
           ? `每周 Token 额度 ${state.weekly_token_limit === Number.MAX_SAFE_INTEGER ? '不限' : state.weekly_token_limit === undefined ? '—' : formatTokenCount(state.weekly_token_limit)}；${state.agreement_exempt ? '管理员无需签署用户协议。' : state.agreement_receipt_id ? '首次使用协议已归档。' : '尚无有效协议归档凭证。'}`
-          : status ?? '请完成企业登录后再修改密码。'}
+          : status ?? (state === null ? null : '请完成企业登录后再修改密码。')}
       </p>
       {state?.authenticated ? <UsageHeatmap callIdentity={callIdentity} /> : null}
       {state?.authenticated ? (

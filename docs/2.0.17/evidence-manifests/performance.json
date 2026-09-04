@@ -1,0 +1,48 @@
+{
+  "schema_version": 2,
+  "ticket": "EM217-502",
+  "claim": "source-only-local-native-image-batch-orchestration",
+  "release_gate": "OPEN",
+  "local": {
+    "status": "OPEN",
+    "environment": null,
+    "result": null,
+    "raw_evidence": { "uri": null, "sha256": null }
+  },
+  "staging": {
+    "status": "OPEN",
+    "environment": null,
+    "result": null,
+    "raw_evidence": { "uri": null, "sha256": null }
+  },
+  "production": {
+    "status": "OPEN",
+    "environment": null,
+    "result": null,
+    "raw_evidence": { "uri": null, "sha256": null }
+  },
+  "external_raw_evidence": {
+    "status": "OPEN",
+    "uri": null,
+    "sha256": null
+  },
+  "macos_gui_first_visible": {
+    "status": "OPEN",
+    "environment": null,
+    "result": null,
+    "raw_evidence": { "uri": null, "sha256": null }
+  },
+  "release_evidence": {
+    "ui_first_visible_p50_seconds": { "comparison": "max", "threshold": 75, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "ui_first_visible_p95_seconds": { "comparison": "max", "threshold": 120, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "relative_same_round_direct_single_p95_seconds": { "comparison": "max", "threshold": 10, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "four_image_all_terminal_p50_seconds": { "comparison": "max", "threshold": 150, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "four_image_all_terminal_p95_seconds": { "comparison": "max", "threshold": 240, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "five_image_all_terminal_p50_seconds": { "comparison": "max", "threshold": 210, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "five_image_all_terminal_p95_seconds": { "comparison": "max", "threshold": 300, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "typed_429_retry_probe_pass": { "comparison": "exact", "threshold": 1, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "duplicate_provider_generation": { "comparison": "exact", "threshold": 0, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "legal_terminal_rate": { "comparison": "min", "threshold": 0.95, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } },
+    "successful_image_retention_rate": { "comparison": "exact", "threshold": 1, "status": "OPEN", "value": null, "ci95": null, "raw_evidence": { "uri": null, "sha256": null } }
+  }
+}

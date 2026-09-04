@@ -41,7 +41,12 @@
 :global([data-emate-composer-frame-host]) {
   --emate-composer-frame-radius: 24px;
   position: relative;
+  gap: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box;
+  border: 2px solid var(--emate-color-rule);
   border-radius: var(--emate-composer-frame-radius);
+  background: var(--emate-color-surface);
 }
 
 :global([data-phase='hero']) {
@@ -57,10 +62,6 @@
 
 :global([data-phase='hero'] [data-composer-seat]) {
   padding-bottom: 32px;
-}
-
-:global([data-phase='hero'] [data-emate-composer-frame-host]) {
-  padding-bottom: 0;
 }
 
 :global([data-phase='active'] [data-emate-composer-frame-host]) {
@@ -88,11 +89,11 @@
   max-width: 100%;
   min-width: 0;
   min-height: 38px;
-  margin-top: -12px;
+  margin-top: 0;
   padding: 6px 14px 10px;
-  border-radius: 0 0 var(--emate-composer-frame-radius) var(--emate-composer-frame-radius);
+  border-top: 1px solid var(--emate-color-rule);
   box-sizing: border-box;
-  background: var(--emate-color-raised);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -101,9 +102,9 @@
   max-width: 100%;
 }
 
-/* Final 2.0.5 Composer.tsx geometry, projected onto the resident Harness
-   InputBar. The target still owns draft, attachments, submit and input state. */
-:global([data-emate-composer-frame-host] > [data-slot='conversation.composer.bar'] > div) {
+/* The semantic card identifies its native root across slot wrappers. The
+   outer frame owns chrome; native content determines its height. */
+:global([data-emate-composer-frame-host] :has(> [data-composer-card])) {
   padding: 0 !important;
 }
 
@@ -116,13 +117,19 @@
   box-shadow: none !important;
 }
 
-:global([data-emate-composer-frame-host] [data-slot='conversation.composer.bar'] [data-composer-card]) {
+:global([data-emate-composer-frame-host] [data-composer-card]) {
   min-height: 112px;
-  border-radius: var(--emate-composer-frame-radius) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
 }
 
-:global([data-emate-composer-frame-host]:has([data-slot='conversation.hero.workspace']) [data-slot='conversation.composer.bar'] [data-composer-card]) {
-  border-radius: var(--emate-composer-frame-radius) var(--emate-composer-frame-radius) 0 0 !important;
+:global([data-emate-composer-frame-host] [data-composer-card])::after {
+  content: none !important;
+}
+
+:global([data-emate-composer-frame-host]:has(textarea[aria-haspopup='menu'])) {
+  border-style: dashed;
 }
 
 :global([data-slot='conversation.composer.bar'] [data-input-mirror]) {

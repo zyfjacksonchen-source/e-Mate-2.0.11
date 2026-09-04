@@ -27,7 +27,7 @@ import { migrateLegacySchedules } from './legacy-schedule.js'
 import { checkOsCredentialBackend } from './profile/credentials-os.js'
 
 export const PRODUCT = 'e-Mate'
-export const VERSION = '2.0.16'
+export const VERSION = '2.0.17'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.0-rc.7'
@@ -234,6 +234,15 @@ function harnessFromPackage() {
   const bin = join(root, 'apps', 'cli', 'lib', 'bin.js')
   if (!existsSync(bin)) return undefined
   const source = readJson(join(packageRoot, 'runtime', 'source-manifest.json'))
+  for (const [expected, path] of [
+    [source?.conversation_adapter_sha256, join(root, 'e-mate-conversation-adapter.mjs')],
+    [source?.conversation_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-conversation', 'lib', 'client.js')],
+  ]) {
+    if (typeof expected !== 'string' || !/^[a-f0-9]{64}$/u.test(expected) || !existsSync(path)
+      || createHash('sha256').update(readFileSync(path)).digest('hex') !== expected) {
+      throw new Error('e-Mate packaged conversation adapter provenance is missing or mismatched')
+    }
+  }
   const version = readJson(join(root, 'apps', 'cli', 'package.json'))?.version
   return { bin, version, commit: source?.commit, source: 'packaged-runtime' }
 }

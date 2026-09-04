@@ -1,16 +1,16 @@
 # e-Mate
 
-e-Mate 桌面应用的 `2.0.16` 是 [GitHub `e-Mate-desktop`](https://github.com/zyfjacksonchen-source/e-Mate-desktop) 的当前源码目标，基于固定 `@deepseek-ai/dsh@0.1.0-rc.7`、Harness `4da69d7c3522ee51de12822c917c503a124f7a7d` 与 `deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`。稳定 Electron `productName`、应用名称和安装位置仍为 `e-Mate`；“Desktop”只描述桌面产品与仓库范围。这些身份只说明源码合同，不表示候选包、安装验收或公共发布已经完成。
+e-Mate 桌面应用的 `2.0.17` 是 [GitHub `e-Mate-desktop`](https://github.com/zyfjacksonchen-source/e-Mate-desktop) 的当前源码目标，基于固定 `@deepseek-ai/dsh@0.1.0-rc.7`、Harness `4da69d7c3522ee51de12822c917c503a124f7a7d` 与 `deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`。稳定 Electron `productName`、应用名称和安装位置仍为 `e-Mate`；“Desktop”只描述桌面产品与仓库范围。这些身份只说明源码合同，不表示候选包、安装验收或公共发布已经完成。
 
 > 仓库第一准则见 [`AGENTS.md`](AGENTS.md)，当前边界见 [`docs/target-contract.md`](docs/target-contract.md)。官方下载页只指向已通过安装与公开回读的正式字节。
 
 ## 下载与安装
 
-只有在精确 macOS 与 Windows 字节完成安装验收、Cloudflare/R2 不可变对象和官方指针均被公开回读后，才从 [e-Mate 官方下载页](https://dl.ecoremedia.net/e-mate/update/) 获取正式安装包。本 README 不宣称 `2.0.16` 已满足这些门禁。
+只有在精确 macOS 与 Windows 字节完成安装验收、Cloudflare/R2 不可变对象和官方指针均被公开回读后，才从 [e-Mate 官方下载页](https://dl.ecoremedia.net/e-mate/update/) 获取正式安装包。本 README 不宣称 `2.0.17` 已满足这些门禁。
 
 - macOS 13+，Universal（Apple 芯片与 Intel Mac）。
 - Windows 10/11 x64。
-- Linux 不属于 `2.0.16` 目标支持范围。
+- Linux 不属于 `2.0.17` 目标支持范围。
 
 用户不需要安装 Node.js、npm、pnpm、Python、Electron、Xcode、MSVC 或 Rust。目标 macOS 和 Windows 安装包均明确按未签名分发处理；只应使用激活后的官方下载页所列不可变 R2 地址并核对 SHA-256。macOS 首次安装按下载页的“未签名安装图解”将 e-Mate 拖入“应用程序”，再通过 Control 点按选择“打开”；页面同时提供只针对 `/Applications/e-Mate.app` 的备用命令。应用不会关闭 Gatekeeper，也不会伪装 Developer ID 或公证状态。
 
@@ -47,9 +47,10 @@ e-Mate 桌面应用的 `2.0.16` 是 [GitHub `e-Mate-desktop`](https://github.com
 Harness 输入继续使用 Node 24.x 与精确 `pnpm@11.7.0`。经主代理授权时，桌面封装只使用 dsh-desktop 的 Yarn workspace 命令：
 
 ```bash
-corepack yarn --cwd desktop install --immutable
-corepack yarn --cwd desktop dist:mac
-corepack yarn --cwd desktop dist:win
+cd desktop
+corepack yarn install --immutable
+corepack yarn dist:mac
+corepack yarn dist:win
 ```
 
 macOS 在本机原生构建，Windows 只在已登录的 Codex Remote Windows 机器上原生构建，不经 SSH。GitHub `e-Mate-desktop` 只承载源码身份、审查与源码 CI，不是安装验收或公共发布传输；Cloudflare/R2 才是公共生产交付边界。精确双平台字节完成安装、覆盖和启动验收后，先上传并回读不可变对象，最后激活官方版本指针。仓库不保留平行 UI/store/router/transport/updater/fallback，也不恢复 schema-2、Profile 热更新、二次签名或另一套 Desktop 发布器；发现偏离即删除并回归原生 owner。

@@ -1,0 +1,908 @@
+{
+  "schemaVersion": 1,
+  "baseline": "2.0.16",
+  "target": "2.0.17",
+  "rows": [
+    {
+      "id": "AGT-001",
+      "category": "agent-tools-jobs-subagents-goals-todos",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Agent streams a response, shows native Tool input/result, and ends with one terminal assistant state that survives reopen.",
+      "preconditions": "Authenticated account and harmless local Tool.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-AGT-001: request harmless local inspection; observe streaming; expand Tool card; verify one terminal result; reopen Session and compare.",
+      "evidenceFile": "EM217-GUI-AGT-001-receipt.json"
+    },
+    {
+      "id": "AGT-002",
+      "category": "agent-tools-jobs-subagents-goals-todos",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Tool Search keeps native Tool ownership, deferred discovery, per-Agent isolation, and the rc.7 web_search definition.",
+      "preconditions": "Managed Profile.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-tool-search/test/tool-search.test.mjs :: discloses deferred native tools without replacing their execution path",
+      "evidenceFile": "packages/dsh-plugin-tool-search/test/tool-search.test.mjs"
+    },
+    {
+      "id": "AGT-003",
+      "category": "agent-tools-jobs-subagents-goals-todos",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Independent multi-image requests use at most four foreground native sibling subagents; each child owns one image and child Session.",
+      "preconditions": "Configured image route; two independent new images.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: Agent operation guidance owns the e-Mate persona and native image batch policy",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "AGT-004",
+      "category": "agent-tools-jobs-subagents-goals-todos",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Background Jobs list, inspect, cancel, and remain correctly projected across navigation.",
+      "preconditions": "Cancellable long-running local Tool.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-AGT-004: start background Job; inspect Jobs status; navigate away/back; cancel; verify one cancelled terminal state.",
+      "evidenceFile": "EM217-GUI-AGT-004-receipt.json"
+    },
+    {
+      "id": "AGT-005",
+      "category": "agent-tools-jobs-subagents-goals-todos",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "One goal persists across continuation rounds and supports pause, restart, resume, and completion without duplication.",
+      "preconditions": "Goal-capable Agent route.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-AGT-005: create two-round safe goal; pause; restart; resume; complete; verify one durable goal record.",
+      "evidenceFile": "EM217-GUI-AGT-005-receipt.json"
+    },
+    {
+      "id": "AGT-006",
+      "category": "agent-tools-jobs-subagents-goals-todos",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Todo replacement updates ordered statuses atomically and survives Session reopen without duplicates.",
+      "preconditions": "Active Session.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-AGT-006: create three todos; advance one to in-progress then completed; reopen; verify unique ordered statuses.",
+      "evidenceFile": "EM217-GUI-AGT-006-receipt.json"
+    },
+    {
+      "id": "ATT-001",
+      "category": "attachments-file-import",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Composer adds/removes supported draft attachments, submits once, restores sent cards, and exposes no host path.",
+      "preconditions": "Small PNG and PDF fixtures.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-ATT-001: attach PNG/PDF; remove and re-add one; send; reopen Session; open both cards; verify no host path.",
+      "evidenceFile": "EM217-GUI-ATT-001-receipt.json"
+    },
+    {
+      "id": "ATT-002",
+      "category": "attachments-file-import",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Every currently allowlisted ordinary extension uses one Host path with canonical extension-owned MIME, byte-equal atomic Workspace storage, safe NFC names, exact limits, collision handling, and batch rollback.",
+      "preconditions": "Known live Session and table-driven fixture bytes.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-file-import/test/file-import.test.mjs :: imports every allowlisted ordinary extension through one canonical host path",
+      "evidenceFile": "packages/dsh-plugin-file-import/test/file-import.test.mjs"
+    },
+    {
+      "id": "ATT-003",
+      "category": "attachments-file-import",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Image media type follows inspected PNG/JPEG/GIF/WebP bytes rather than a wrong filename declaration.",
+      "preconditions": "Mislabeled image fixtures.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-file-import/test/image-normalization.test.mjs :: normalizes the T18 JPEG signature despite a png name and declaration",
+      "evidenceFile": "packages/dsh-plugin-file-import/test/image-normalization.test.mjs"
+    },
+    {
+      "id": "ATT-004",
+      "category": "attachments-file-import",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Pinned rc.7-valid internal failures and all transport, parser, invalid_union, unknown-code, and arbitrary Host failures render only fixed safe copy; expected validation is allowlisted and bounded.",
+      "preconditions": "Captured custom RpcResult and thrown Zod-like fixtures.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-file-import/test/client-result.test.mjs :: maps transport and thrown Zod-like invalid_union values to fixed safe copy",
+      "evidenceFile": "packages/dsh-plugin-file-import/test/client-result.test.mjs"
+    },
+    {
+      "id": "ATT-005",
+      "category": "attachments-file-import",
+      "priority": "P1",
+      "release": "2.0.17-new",
+      "platforms": [
+        "web"
+      ],
+      "behavior": "Picker cancellation is a no-op, a failed import can be selected again, and a Session switch discards the stale result without mutating the new draft.",
+      "preconditions": "Installed Web component test dependencies.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx :: drops an old in-flight result after switching sessions",
+      "evidenceFile": "packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx"
+    },
+    {
+      "id": "ATT-006",
+      "category": "attachments-file-import",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": ["web", "macos", "windows"],
+      "behavior": "Compact horizontal file cards use standard type icons, filename and extension labels inside the native composer; attachments, input and workspace footer grow within one continuous frame and edge light. Generated @ references and import paths stay out of draft, chat and message navigation display while exact file submission and real filename @ remain intact. Local PNG drafts persist only target-Session CAS metadata, hydrate with fresh native ids after restart, and block submit during staging or hydration. Selection commits image staging until native association; transient restore failures retain refs with explicit retry/remove actions.",
+      "preconditions": "Native App or Web runtime, persisted legacy draft, text plus five ordinary file refs and local chooser/drop/paste PNG fixtures; live send needs a valid model route.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-ATT-006: start the integrated runtime; migrate old draft; add text, five ordinary file refs and chooser/drop/paste PNG; verify in-flight image rows cannot be removed; fully restart; exercise transient retry/remove; verify the same native image reappears from its target-Session CAS ref with a fresh runtime id, cards/plain text/native controls remain, and submit stays blocked during staging/hydration; send/reopen and verify exact references with no generated @ display. Local display fixtures do not prove live send.",
+      "evidenceFile": "EM217-GUI-ATT-006-receipt.json"
+    },
+    {
+      "id": "CU-MAC-001",
+      "category": "computer-use-macos",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos"
+      ],
+      "behavior": "macOS Computer Use keeps immutable universal helper, projects permission/readiness, and expires authorization before the next direct request.",
+      "preconditions": "macOS app-directory/dev candidate and OS permissions.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-computer-use/test/contract.test.mjs :: computer-use adapter preserves Darwin and adds one pinned Windows backend",
+      "evidenceFile": "packages/dsh-plugin-computer-use/test/contract.test.mjs"
+    },
+    {
+      "id": "DSK-001",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Startup commits after loopback renderer health; failure/timeout exposes recovery and no premature tray commands.",
+      "preconditions": "Desktop fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/electron-runtime.spec.ts :: keeps tray commands unavailable until the Web surface loads and startup commits",
+      "evidenceFile": "desktop/e-mate-desktop/tests/electron-runtime.spec.ts"
+    },
+    {
+      "id": "DSK-002",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Window uses an isolated renderer and native platform frame, including platform-owned macOS and Windows chrome branches.",
+      "preconditions": "Platform window fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/window-options.spec.ts :: preserves the native frame and enables renderer isolation",
+      "evidenceFile": "desktop/e-mate-desktop/tests/window-options.spec.ts"
+    },
+    {
+      "id": "DSK-003",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Profile defaults to e-mate, persists before restart, rolls failed startup back, and repairs managed packages atomically.",
+      "preconditions": "Fresh/repairable Profile.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/profile-manager.spec.ts :: promotes a healthy profile and explicitly rolls a later failed profile back",
+      "evidenceFile": "desktop/e-mate-desktop/tests/profile-manager.spec.ts"
+    },
+    {
+      "id": "DSK-004",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "desktopPnpm uses packaged physical pnpm, validates/serializes operations, and restores partial writes on failure.",
+      "preconditions": "Packaged process fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/pnpm.spec.ts :: restores partial profile writes when a recoverable plugin install exits nonzero",
+      "evidenceFile": "desktop/e-mate-desktop/tests/pnpm.spec.ts"
+    },
+    {
+      "id": "DSK-005",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Terminal opens active Profile through private shims; localized paths work and launch failures surface natively.",
+      "preconditions": "Platform terminal fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/desktop-terminal.spec.ts :: generates Windows batch shims and opens PowerShell through a visible-console broker",
+      "evidenceFile": "desktop/e-mate-desktop/tests/desktop-terminal.spec.ts"
+    },
+    {
+      "id": "DSK-006",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Resource/file bridge is exact and workspace-fenced; historical child images materialize only for download/reveal.",
+      "preconditions": "Live workspace and historical child receipt.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/electron-runtime.spec.ts :: keeps historical child image actions renderer-scoped and materializes only for download or reveal",
+      "evidenceFile": "desktop/e-mate-desktop/tests/electron-runtime.spec.ts"
+    },
+    {
+      "id": "DSK-007",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Settings, tray, background schedule, and natural-language update requests delegate to the same Desktop update lifecycle.",
+      "preconditions": "Fixed fetch/download fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/updates.spec.ts :: delegates natural-language and tray checks to the same lifecycle",
+      "evidenceFile": "desktop/e-mate-desktop/tests/updates.spec.ts"
+    },
+    {
+      "id": "DSK-008",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Tray contributions remain effect-scoped, ordered, and preserve native commands.",
+      "preconditions": "Committed Desktop runtime fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/electron-runtime.spec.ts :: rebuilds ordered effect-scoped tray contributions without replacing native commands",
+      "evidenceFile": "desktop/e-mate-desktop/tests/electron-runtime.spec.ts"
+    },
+    {
+      "id": "DSK-009",
+      "category": "desktop-startup-window-tray-profile-pnpm-terminal-resources-update",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Update checking accepts only a strictly newer stable version from the fixed no-cache endpoint.",
+      "preconditions": "Fixed version endpoint fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/update-checker.spec.ts :: uses only the fixed no-cache version endpoint and reports a newer stable version",
+      "evidenceFile": "desktop/e-mate-desktop/tests/update-checker.spec.ts"
+    },
+    {
+      "id": "ENT-001",
+      "category": "enterprise-gateway-admin-audit-usage",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "server"
+      ],
+      "behavior": "Auth Gateway enforces exact identity contracts, bounded errors, tenant configuration, and secret redaction.",
+      "preconditions": "In-memory gateway fixtures.",
+      "evidenceOwner": "automated-test",
+      "evidence": "enterprise/apps/auth-gateway/tests/server.test.ts :: password and refresh endpoints use the exact desktop request and response contracts",
+      "evidenceFile": "enterprise/apps/auth-gateway/tests/server.test.ts"
+    },
+    {
+      "id": "ENT-002",
+      "category": "enterprise-gateway-admin-audit-usage",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "server"
+      ],
+      "behavior": "Model Gateway authenticates tenant routes, admits catalog models, accounts terminal usage idempotently, and blocks replay around unknown work.",
+      "preconditions": "In-memory provider/usage stores.",
+      "evidenceOwner": "automated-test",
+      "evidence": "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts :: keeps invocation state idempotent and blocks direct usage around unknown work",
+      "evidenceFile": "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts"
+    },
+    {
+      "id": "ENT-003",
+      "category": "enterprise-gateway-admin-audit-usage",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "server",
+        "web"
+      ],
+      "behavior": "Admin login/mutations are same-origin and role/tenant scoped; model credentials are separate, write-only, bound, and revocable.",
+      "preconditions": "Admin tenant fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "enterprise/apps/admin/tests/api.test.ts :: admin mutations derive tenant server-side and client secrets never appear in list responses",
+      "evidenceFile": "enterprise/apps/admin/tests/api.test.ts"
+    },
+    {
+      "id": "ENT-004",
+      "category": "enterprise-gateway-admin-audit-usage",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all",
+        "server"
+      ],
+      "behavior": "Audit records only real terminal Harness usage, redacts private data, deduplicates reconnect/concurrent flush, and replays persisted outbox.",
+      "preconditions": "Sanitized events and transport fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: audit records only real Harness usage and deduplicates reconnect replay and concurrent flush",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "ENT-005",
+      "category": "enterprise-gateway-admin-audit-usage",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "server",
+        "web"
+      ],
+      "behavior": "Usage API/dashboard keeps exact ledger facts, tenant scope, reconciliation mismatches, bounded periods, and authenticated refresh/logout.",
+      "preconditions": "Sanitized usage ledger.",
+      "evidenceOwner": "automated-test",
+      "evidence": "enterprise/apps/usage-dashboard/tests/usage-data.test.ts :: projects real token, user, quota, model, and reconciliation facts",
+      "evidenceFile": "enterprise/apps/usage-dashboard/tests/usage-data.test.ts"
+    },
+    {
+      "id": "IDN-001",
+      "category": "identity-login-agreements-model-policy",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Registration, login, remember-login, password change, and logout stay on bounded enterprise identity RPC; logout clears local credentials before remote revocation.",
+      "preconditions": "Configured enterprise identity and approved account.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: identity agreements are immutable, explicit, and use the target Connection RPC",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "IDN-002",
+      "category": "identity-login-agreements-model-policy",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Workspace stays locked until the immutable agreement bundle and all required acknowledgements are accepted.",
+      "preconditions": "Authenticated account without agreement receipt.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: identity agreements are immutable, explicit, and use the target Connection RPC",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "IDN-003",
+      "category": "identity-login-agreements-model-policy",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Admitted enterprise model policy preserves native Session history across model switch and cached-policy outage/restart without fallback.",
+      "preconditions": "Authenticated account with cached policy.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: enterprise model switch keeps native history and survives a cached-policy outage and cold restart",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "IDN-004",
+      "category": "identity-login-agreements-model-policy",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Late lease, refresh, login, and policy responses cannot revive logged-out or superseded credentials.",
+      "preconditions": "Overlapping identity generations.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/identity-lifecycle.test.mjs :: late refresh and runtime policy responses cannot revive credentials after logout or a newer login",
+      "evidenceFile": "packages/dsh/test/identity-lifecycle.test.mjs"
+    },
+    {
+      "id": "NEW-ENT-RECOVERY-001",
+      "category": "identity-login-agreements-model-policy",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": [
+        "all",
+        "server"
+      ],
+      "behavior": "New acceptance: local routes remain usable when enterprise authentication is unavailable; enterprise delivery requires live Gateway authority, rejects expired or revoked state and direct-provider fallback, and reconnects without restart when refresh remains valid.",
+      "preconditions": "EM217-206 source integrated. Source-only support: packages/dsh/profile/plugins/emate-shell/tests/enterprise-model-recovery.client.spec.tsx :: keeps an ordinary local route and shell interactive when enterprise auth is unavailable. This proves local shell availability only; full fault/reconnect/gateway-startup, live PostgreSQL, external immutable, GUI, installed, and production evidence remain OPEN under docs/2.0.17/contracts/enterprise-model-recovery.md.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-NEW-ENT-RECOVERY-001: exercise the authorized warm/cold management outage and reconnect scenarios; verify native local owners remain usable and expired/revoked enterprise state cannot submit; record scenario-specific live Gateway/PostgreSQL evidence and keep unexecuted fault, installed, and production gates OPEN.",
+      "evidenceFile": "EM217-206-enterprise-model-recovery-receipt.json"
+    },
+    {
+      "id": "IMG-001",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Single image generation uses imagegen, Model Gateway, native Job, Attachment CAS, receipt, and Session projection.",
+      "preconditions": "Image-entitled account and gpt-image-2-pro route.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: image generation reuses the Model Gateway with Harness Jobs and attachments",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "IMG-002",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Single edit resolves current-Session source attachment, calls /images/edits, and remains needs-review until human confirmation.",
+      "preconditions": "Current Session generated image.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: image generation reuses the Model Gateway with Harness Jobs and attachments",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "IMG-003",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "image_pack packages only verified same-Session terminal image receipts and rejects cross-Session use.",
+      "preconditions": "Two same-Session terminal receipts.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: image generation reuses the Model Gateway with Harness Jobs and attachments",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "IMG-004",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Cold hydration restores completed, needs-review, and failed image receipts while one failed child does not hide the rest.",
+      "preconditions": "Persisted parent/direct-child receipts.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/image-projection-hydration.test.mjs :: hydrates completed, review-required, and failed receipts on the first pass",
+      "evidenceFile": "packages/dsh/test/image-projection-hydration.test.mjs"
+    },
+    {
+      "id": "IMG-005",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Parent Gallery renders direct-child terminal images from read-only Session projections, including after cold restart.",
+      "preconditions": "Two completed foreground image subagents.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-IMG-005: request two images; verify child and parent Galleries; restart; reopen parent; verify both images and child links.",
+      "evidenceFile": "EM217-GUI-IMG-005-receipt.json"
+    },
+    {
+      "id": "IMG-006",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Cancellation before/during provider submission creates one cancelled receipt and no silent retry/replacement.",
+      "preconditions": "Delayed provider fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: image generation reuses the Model Gateway with Harness Jobs and attachments",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "IMG-007",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Outcome-unknown is terminal, billing remains unknown, and restart never automatically replays it.",
+      "preconditions": "Post-submission failure fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: image generation reuses the Model Gateway with Harness Jobs and attachments",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "NEW-IMG-LATENCY-001",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": [
+        "all",
+        "macos"
+      ],
+      "behavior": "New acceptance: direct single-image generation bypasses image_batch and stays within the pinned-owner lower-bound p95/p99 relaxations; cached-local-byte macOS dev terminal-projection-to-first-visible handoff is p95 <= 500 ms.",
+      "preconditions": "EM217-107 and EM217-202 source complete. Source-only support: tests/performance/image-single/contract.test.mjs :: validates exact protocol, counts, hashes, stages, arithmetic, and three repetitions. This validates the benchmark protocol only; external immutable and GUI evidence remain OPEN under docs/2.0.17/contracts/single-image-latency.md; macOS dev evidence cannot satisfy installed or production gates.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-NEW-IMG-LATENCY-001: measure cached-local-byte terminal-projection-to-first-visible image handoff in the authorized macOS app-directory/dev build; require p95 <= 500 ms and exact source provenance plus external raw URI/SHA-256; keep installed and production gates OPEN.",
+      "evidenceFile": "EM217-GUI-NEW-IMG-LATENCY-001-receipt.json"
+    },
+    {
+      "id": "NEW-IMG-BATCH-001",
+      "category": "image-batch-new",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "New acceptance: image_batch is sole multi-new-image entry with durable parent/items/children/Jobs, one gateway request per image, live Gallery, restart recovery, cancellation, and no unknown replay.",
+      "preconditions": "Completed implementation; deterministic 2/4/5/8-item fixture.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-NEW-IMG-BATCH-001: submit five independent new-image tasks using fixed provider defaults; observe item progress; restart; verify recovery; cancel one; inject one unknown; verify no retry/duplicate and one request/item.",
+      "evidenceFile": "EM217-GUI-NEW-IMG-BATCH-001-receipt.json"
+    },
+    {
+      "id": "NEW-WIN-CU-001",
+      "category": "computer-use-windows-new",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": [
+        "windows"
+      ],
+      "behavior": "New acceptance: single Windows backend binds app+HWND+PID+fresh hash, rejects stale/reused targets, releases input on all exits, and preserves per-turn/action approval.",
+      "preconditions": "EM217-408 and installed Windows candidate.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-NEW-WIN-CU-001: observe same-title windows; act on bound HWND; recreate target and verify stale refusal; cancel held input; verify release; new Turn requires authorization.",
+      "evidenceFile": "EM217-GUI-NEW-WIN-CU-001-receipt.json"
+    },
+    {
+      "id": "PRO-001",
+      "category": "profile-plugins",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Shipped Profile: shell, skill-hub, better-sidebar, cdp, computer-use, file-import, find-skill, genui, glass-composer, mcp-manage, memory-evolve, office-skills, schedules, tool-search, vision-toolkit, navigation-bar, at-file, file-viewer, visualize.",
+      "preconditions": "Fresh and repairable Profile.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts :: installs the fixed product profile and replaces legacy CLI update guidance",
+      "evidenceFile": "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts"
+    },
+    {
+      "id": "PRO-002",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Skill Hub search/install/disable/enable/uninstall closes through one native owner and readback.",
+      "preconditions": "Skill Hub fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-skill-hub/test/skill-hub.test.mjs :: one Skill Hub owner closes install, disable, enable, and uninstall through native readback",
+      "evidenceFile": "packages/dsh-plugin-skill-hub/test/skill-hub.test.mjs"
+    },
+    {
+      "id": "PRO-003",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "CDP starts installed Chrome only on explicit browser use with isolated loopback profile and native approval for mutations.",
+      "preconditions": "Supported Chrome.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-cdp/test/contract.test.mjs :: keeps Chrome out of application startup and starts it on first browser use",
+      "evidenceFile": "packages/dsh-plugin-cdp/test/contract.test.mjs"
+    },
+    {
+      "id": "PRO-004",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Find Skill verifies pinned connector bytes and limits persistent installation to approved connector sources.",
+      "preconditions": "Pinned connector fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-find-skill/test/contract.test.mjs :: find-skill is pinned and limits persistent installation to connector sources",
+      "evidenceFile": "packages/dsh-plugin-find-skill/test/contract.test.mjs"
+    },
+    {
+      "id": "PRO-005",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "GenUI preserves its pinned Tool, Skill, and client surfaces on the rc.7 component.",
+      "preconditions": "Managed Profile and fixtures.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-genui/test/package.test.mjs :: preserves the pinned GenUI Tool, Skill, and client surfaces on the rc.7 component",
+      "evidenceFile": "packages/dsh-plugin-genui/test/package.test.mjs"
+    },
+    {
+      "id": "PRO-006",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Office Skills round-trip DOCX/XLSX/PPTX/PDF while retaining workspace confinement and non-overwrite behavior.",
+      "preconditions": "Bundled fixtures.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-office-skills/test/package.test.mjs :: round-trips real DOCX, XLSX, PPTX, and Chinese PDF bytes",
+      "evidenceFile": "packages/dsh-plugin-office-skills/test/package.test.mjs"
+    },
+    {
+      "id": "PRO-007",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "MCP management delegates to native DSH, keeps secrets out of Settings, and accepts only one matching OAuth state.",
+      "preconditions": "Sanitized MCP fixture; no real service.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-mcp-manage/test/contract.test.mjs :: MCP management keeps native DSH ownership and secrets out of settings",
+      "evidenceFile": "packages/dsh-plugin-mcp-manage/test/contract.test.mjs"
+    },
+    {
+      "id": "PRO-008",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Project memory remains durable and project-isolated and reaches the model request through existing Tool Search seams.",
+      "preconditions": "Two isolated project workspaces.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-memory-evolve/test/installed-project-memory.test.ts :: installed Tool Search keeps real project memory durable, isolated, and present in the model request",
+      "evidenceFile": "packages/dsh-plugin-memory-evolve/test/installed-project-memory.test.ts"
+    },
+    {
+      "id": "PRO-009",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Schedules UI projects native Schedule events without owning execution or storage.",
+      "preconditions": "Native Schedule service and fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-schedules/test/contracts.test.mjs :: projects real native Schedule events without owning execution or storage",
+      "evidenceFile": "packages/dsh-plugin-schedules/test/contracts.test.mjs"
+    },
+    {
+      "id": "PRO-010",
+      "category": "profile-plugins",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Vision Toolkit resolves only exact current-Session image attachments and rejects cross-Session IDs.",
+      "preconditions": "Current and foreign Session attachments.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-vision-toolkit/test/attachment-source.test.mjs :: vision_glance resolves only an exact current-session image attachment",
+      "evidenceFile": "packages/dsh-plugin-vision-toolkit/test/attachment-source.test.mjs"
+    },
+    {
+      "id": "SES-001",
+      "category": "sessions-history-migration",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "macos",
+        "windows"
+      ],
+      "behavior": "Create, reopen, archive, and restart multiple Sessions while preserving their distinct message and Tool history.",
+      "preconditions": "Installed candidate; authenticated workspace.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-SES-001: create Sessions A/B; send distinct prompts; run one harmless Tool in A; restart; reopen both; compare content; archive A; verify B remains.",
+      "evidenceFile": "EM217-GUI-SES-001-receipt.json"
+    },
+    {
+      "id": "SES-002",
+      "category": "sessions-history-migration",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "CowAgent and ECoreX sources import idempotently through native SessionPersistence; deleted threads are excluded and Tool history remains evidence.",
+      "preconditions": "Sanitized legacy fixtures.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/legacy-migration.test.mjs :: imports CowAgent sessions through the real Harness SessionPersistence and replays idempotently",
+      "evidenceFile": "packages/dsh/test/legacy-migration.test.mjs"
+    },
+    {
+      "id": "SES-003",
+      "category": "sessions-history-migration",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Corrupt/non-SQLite legacy sources fail closed without changing current Sessions; source data remains read-only.",
+      "preconditions": "Corrupt legacy fixture.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/legacy-migration.test.mjs :: a corrupt optional legacy source fails closed without leaking its path or changing current sessions",
+      "evidenceFile": "packages/dsh/test/legacy-migration.test.mjs"
+    },
+    {
+      "id": "WEB-001",
+      "category": "web-shell-navigation-settings-theme-sidebar-composer-accessibility",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "web",
+        "macos",
+        "windows"
+      ],
+      "behavior": "Home, chat URL, history, Settings, and capability navigation use native router/store and no parallel transport.",
+      "preconditions": "Unlocked managed Profile.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: managed profile installation is idempotent",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "WEB-002",
+      "category": "web-shell-navigation-settings-theme-sidebar-composer-accessibility",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "web",
+        "macos",
+        "windows"
+      ],
+      "behavior": "Settings URL projects SettingsRoot; account/model/capability sections open and browser mode has no native document action.",
+      "preconditions": "Managed Profile.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh/test/e-mate.test.mjs :: settings URL is a lifecycle projection over the target SettingsRoot state",
+      "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "WEB-003",
+      "category": "web-shell-navigation-settings-theme-sidebar-composer-accessibility",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "web",
+        "macos",
+        "windows"
+      ],
+      "behavior": "Light/dark/system theme resolves consistently in Web and native chrome without removing unrelated DOM state.",
+      "preconditions": "Theme Settings available.",
+      "evidenceOwner": "automated-test",
+      "evidence": "desktop/e-mate-desktop/tests/theme-presenter.spec.ts :: projects resolved light/dark/system snapshots and disposes only its own DOM state",
+      "evidenceFile": "desktop/e-mate-desktop/tests/theme-presenter.spec.ts"
+    },
+    {
+      "id": "WEB-004",
+      "category": "web-shell-navigation-settings-theme-sidebar-composer-accessibility",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "web",
+        "macos",
+        "windows"
+      ],
+      "behavior": "Sidebar projects Sessions/projects across archive/restart; desktop rail collapses/re-expands without losing preference.",
+      "preconditions": "Two workspaces and Sessions.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-better-sidebar/test/contracts.test.mjs :: projects remain session-scoped across workspaces, archive, restart, and traversal failure",
+      "evidenceFile": "packages/dsh-plugin-better-sidebar/test/contracts.test.mjs"
+    },
+    {
+      "id": "WEB-005",
+      "category": "web-shell-navigation-settings-theme-sidebar-composer-accessibility",
+      "priority": "P1",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "web",
+        "macos",
+        "windows"
+      ],
+      "behavior": "Glass Composer decorates one native Composer; send/stop, attachment, connector, and model controls remain usable at narrow/wide widths.",
+      "preconditions": "Managed Profile; narrow/wide viewport.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-glass-composer/test/contracts.test.mjs :: keeps one native Composer owner and decorates its semantic frame host",
+      "evidenceFile": "packages/dsh-plugin-glass-composer/test/contracts.test.mjs"
+    },
+    {
+      "id": "WEB-006",
+      "category": "web-shell-navigation-settings-theme-sidebar-composer-accessibility",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "web",
+        "macos",
+        "windows"
+      ],
+      "behavior": "Keyboard traversal reaches navigation, composer, Settings, dialogs, and image actions with visible focus, names, trapping, and focus return.",
+      "preconditions": "Keyboard only; accessibility tree available.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-WEB-006: use Tab/Shift+Tab/Enter/Escape across named controls; verify visible focus, labels, dialog trap/return, and no dead end.",
+      "evidenceFile": "EM217-GUI-WEB-006-receipt.json"
+    },
+    {
+      "id": "WIN-GAP-001",
+      "category": "windows-gaps",
+      "priority": "P0",
+      "release": "2.0.16-baseline",
+      "platforms": [
+        "windows"
+      ],
+      "behavior": "Truthful gap: 2.0.16 native Windows Computer Use is unavailable and must not claim ready or ship a substitute helper.",
+      "preconditions": "Windows 2.0.16 Profile.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-computer-use/test/contract.test.mjs :: computer-use adapter preserves Darwin and adds one pinned Windows backend",
+      "evidenceFile": "packages/dsh-plugin-computer-use/test/contract.test.mjs"
+    }
+  ]
+}

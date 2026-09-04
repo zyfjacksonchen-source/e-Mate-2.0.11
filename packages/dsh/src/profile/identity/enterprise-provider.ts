@@ -23,23 +23,26 @@ const CHAT_MODELS = [
   'doubao-seed-2-0-pro-260215',
 ]
 const RUNTIME_MODEL_CONTRACT = new Map([
-  ['gpt-5.6-luna', { upstreamModelId: 'gpt-5.6-luna', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: 'E_MATE_MODEL_KEY_GPT' }],
-  ['gpt-5.6-sol', { upstreamModelId: 'gpt-5.6-sol', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: 'E_MATE_MODEL_KEY_GPT' }],
-  ['deepseek', { upstreamModelId: 'deepseek-v4-flash', apiMode: 'chat-completions', provider: 'e-mate-enterprise-deepseek', credentialRef: 'E_MATE_MODEL_KEY_DEEPSEEK' }],
+  ['gpt-5.6-luna', { upstreamModelId: 'gpt-5.6-luna', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
+  ['gpt-5.6-sol', { upstreamModelId: 'gpt-5.6-sol', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
+  ['deepseek', { upstreamModelId: 'deepseek-v4-flash', apiMode: 'chat-completions', provider: 'e-mate-enterprise-deepseek', credentialRef: MODEL_SESSION_REF }],
   ['doubao-seed-2-0-pro-260215', {
     upstreamModelId: 'doubao-seed-2-0-pro-260215',
     apiMode: 'chat-completions',
     provider: 'e-mate-enterprise-doubao',
-    credentialRef: 'E_MATE_MODEL_KEY_DOUBAO',
+    credentialRef: MODEL_SESSION_REF,
   }],
 ])
-export const RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze(
-  [...new Set([...RUNTIME_MODEL_CONTRACT.values()].map(({ credentialRef }) => credentialRef))],
-)
+export const RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze([MODEL_SESSION_REF])
+const OBSOLETE_RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze([
+  'E_MATE_MODEL_KEY_GPT',
+  'E_MATE_MODEL_KEY_DEEPSEEK',
+  'E_MATE_MODEL_KEY_DOUBAO',
+])
 const LOCAL_CREDENTIAL_REFS = Object.freeze([
   SESSION_REF,
   MODEL_SESSION_REF,
-  ...RUNTIME_MODEL_CREDENTIAL_REFS,
+  ...OBSOLETE_RUNTIME_MODEL_CREDENTIAL_REFS,
   'E_MATE_SEARCH_KEY_DEEPSEEK',
 ])
 const ADMIN_ROLES = new Set(['TENANT_ADMIN', 'AUDIT_ADMIN'])
@@ -161,7 +164,6 @@ export type RuntimeModel = {
   api: 'openai-responses' | 'openai-completions'
   upstreamModelId: string
   upstreamBaseUrl: string
-  upstreamApiKey: string
   label: string
   input: Array<'text' | 'image'>
   reasoning: boolean
@@ -268,24 +270,7 @@ function modelIds(value: unknown): string[] {
   return [...value]
 }
 
-function runtimeUpstreamBaseUrl(value: unknown, allowInsecureHttp: boolean): string {
-  if (typeof value !== 'string' || value.length > 2_048) {
-    throw new Error('e-Mate enterprise runtime model URL is invalid')
-  }
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw new Error('e-Mate enterprise runtime model URL is invalid')
-  }
-  if (!url.hostname || url.username || url.password || url.search || url.hash
-    || (url.protocol !== 'https:' && !(url.protocol === 'http:' && allowInsecureHttp))) {
-    throw new Error('e-Mate enterprise runtime model URL is invalid')
-  }
-  return url.toString().replace(/\/+$/u, '')
-}
-
-function runtimeModels(value: unknown, allowed: readonly string[]): RuntimeModel[] {
+function runtimeModels(value: unknown, allowed: readonly string[], gatewayRoot: string): RuntimeModel[] {
   if (!isRecord(value)
     || !exact(value, ['schemaVersion', 'models', 'searchCredentialGrant'])
     || value.schemaVersion !== 1
@@ -298,24 +283,17 @@ function runtimeModels(value: unknown, allowed: readonly string[]): RuntimeModel
   return value.models.map(model => {
     if (!isRecord(model)
       || !exact(model, [
-        'id', 'apiMode', 'upstreamModelId', 'upstreamBaseUrl', 'upstreamApiKey', 'label', 'input',
-        'reasoning', 'contextWindow', 'maxTokens',
-        ...(model.allowInsecureHttpUpstream === undefined ? [] : ['allowInsecureHttpUpstream']),
+        'id', 'apiMode', 'upstreamModelId', 'label', 'input', 'reasoning', 'contextWindow', 'maxTokens',
       ])) {
       throw new Error('e-Mate enterprise runtime model is invalid')
     }
     const id = identifier(model.id, 'runtime model id')
     const contract = RUNTIME_MODEL_CONTRACT.get(id)
-    const allowInsecureHttp = model.allowInsecureHttpUpstream === true
     if (contract === undefined
       || !allowed.includes(id)
       || seen.has(id)
       || model.upstreamModelId !== contract.upstreamModelId
       || model.apiMode !== contract.apiMode
-      || typeof model.upstreamApiKey !== 'string'
-      || model.upstreamApiKey.length < 20
-      || model.upstreamApiKey.length > 8_192
-      || /\s/u.test(model.upstreamApiKey)
       || typeof model.reasoning !== 'boolean'
       || !Array.isArray(model.input)
       || model.input.length < 1
@@ -327,8 +305,7 @@ function runtimeModels(value: unknown, allowed: readonly string[]): RuntimeModel
       || Number(model.contextWindow) > 10_000_000
       || !Number.isSafeInteger(model.maxTokens)
       || Number(model.maxTokens) < 1
-      || Number(model.maxTokens) > 10_000_000
-      || (model.allowInsecureHttpUpstream !== undefined && !allowInsecureHttp)) {
+      || Number(model.maxTokens) > 10_000_000) {
       throw new Error('e-Mate enterprise runtime model is invalid')
     }
     seen.add(id)
@@ -336,10 +313,9 @@ function runtimeModels(value: unknown, allowed: readonly string[]): RuntimeModel
       id,
       provider: contract.provider,
       credentialRef: contract.credentialRef,
-      api: model.apiMode === 'responses' ? 'openai-responses' : 'openai-completions',
-      upstreamModelId: contract.upstreamModelId,
-      upstreamBaseUrl: runtimeUpstreamBaseUrl(model.upstreamBaseUrl, allowInsecureHttp),
-      upstreamApiKey: model.upstreamApiKey,
+      api: 'openai-responses',
+      upstreamModelId: id,
+      upstreamBaseUrl: `${gatewayRoot}/v1`,
       label: text(model.label, 'runtime model label', 80),
       input: [...model.input] as Array<'text' | 'image'>,
       reasoning: model.reasoning,
@@ -809,10 +785,13 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       return await refreshing
     } catch (error) {
       if (expectedRevision === leaseRevision
-        && Date.parse(value.session.expiresAt) <= now()
         && error instanceof RefreshFailure
         && TERMINAL_REFRESH_FAILURE_CODES.has(error.code)) {
-        await clear().catch(() => undefined)
+        try {
+          await clear()
+        } catch (cleanupError) {
+          throw new AggregateError([error, cleanupError], 'e-Mate terminal enterprise credential clearing failed')
+        }
       }
       throw error
     } finally {
@@ -820,15 +799,16 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     }
   }
 
-  const active = async (requireFreshModel: boolean) => {
+  const active = async () => {
     const value = await load()
     if (value === undefined) return undefined
     const accessExpired = Date.parse(value.session.expiresAt) <= now()
-    if (accessExpired || Date.parse(value.session.modelGateway.expiresAt) <= now() + REFRESH_EARLY_MS) {
+    const modelExpired = Date.parse(value.session.modelGateway.expiresAt) <= now()
+    if (accessExpired || modelExpired || Date.parse(value.session.modelGateway.expiresAt) <= now() + REFRESH_EARLY_MS) {
       try {
         return await refresh(value)
       } catch (error) {
-        if (accessExpired || requireFreshModel) throw error
+        if (current !== value || accessExpired || modelExpired) throw error
       }
     }
     return value
@@ -845,7 +825,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   }
 
   const authorized = async (path: string, init: RequestInit, label: string) => {
-    const value = await active(true)
+    const value = await active()
     if (value === undefined) throw new Error('e-Mate login is required')
     return modelCall(value, path, init, label)
   }
@@ -871,18 +851,18 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
 
   const modelRuntimePolicy = async () => {
     const expectedRevision = leaseRevision
-    const value = await active(true)
+    const value = await active()
     if (value === undefined) throw new Error('e-Mate login is required')
     if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const response = await modelCall(
       value,
-      '/v1/runtime-models?client_version=2.0.16',
+      '/v1/runtime-models?client_version=2.0.17',
       { method: 'GET' },
       'runtime models',
     )
     if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const grant = searchCredentialGrant(response)
-    const models = runtimeModels(response, value.session.modelGateway.allowedModelIds)
+    const models = runtimeModels(response, value.session.modelGateway.allowedModelIds, modelRoot)
     return { policy: policyFor(value, models), models, searchCredentialGrant: grant }
   }
 
@@ -895,12 +875,16 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     async bootstrap() {
       let value: StoredSession | undefined
       try {
-        value = await active(false)
+        value = await active()
       } catch (error) {
         if (!(error instanceof IdentityServiceUnavailable)) throw error
         value = await load()
       }
       if (value === undefined) return { authenticated: false, workspace_unlocked: false }
+      if (Date.parse(value.session.expiresAt) <= now()
+        || Date.parse(value.session.modelGateway.expiresAt) <= now()) {
+        return { authenticated: false, workspace_unlocked: false }
+      }
       if (agreementExempt(value)) {
         return {
           authenticated: true,
@@ -924,7 +908,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       }
     },
     async keepAlive() {
-      await active(true)
+      await active()
     },
     async issueRegistrationChallenge() {
       const value = await call(authRoot, '/v1/auth/registration/challenge', {
@@ -1021,7 +1005,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       }
     },
     async changePassword(input: { current_password: string; new_password: string; client_request_id: string }) {
-      const value = await active(false)
+      const value = await active()
       if (value === undefined) throw new Error('e-Mate login is required')
       const receipt = mutationReceipt(await call(authRoot, '/v1/auth/password/change', {
         method: 'POST',
@@ -1038,7 +1022,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       return receipt
     },
     async acceptAgreements() {
-      const value = await active(true)
+      const value = await active()
       if (value === undefined) throw new Error('e-Mate login is required')
       const expectedRevision = leaseRevision
       const status = consentStatus(await modelCall(value, '/v1/consents/current', { method: 'GET' }, 'consent status'))
@@ -1054,7 +1038,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.16',
+          clientVersion: '2.0.17',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)
@@ -1118,7 +1102,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       if (target.username || target.password || target.hash || (!modelTarget && !skillHubTarget)) {
         throw new Error('e-Mate authenticated request target is outside the managed enterprise root')
       }
-      const value = await active(true)
+      const value = await active()
       if (value === undefined) throw new Error('e-Mate login is required')
       const headers = new Headers(init.headers)
       if (headers.has('authorization')) throw new Error('e-Mate authenticated request cannot override authorization')

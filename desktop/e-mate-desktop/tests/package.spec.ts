@@ -162,9 +162,12 @@ describe('published package surface', () => {
     expect(config).toContain("entryFileNames: 'preload.cjs'")
   })
 
-  it('keeps target Python preparation out of the portable Base SDK build', () => {
+  it('keeps host-only preparation and profile boot out of portable source checks', () => {
     expect(manifest.scripts?.build).toBe('yarn run prepare:python && yarn run build:sdk')
     expect(manifest.scripts?.['build:sdk']).not.toContain('prepare:python')
+    expect(manifest.scripts?.['check:source']).toBe('yarn run build:sdk && yarn run typecheck && yarn run test && yarn run verify:closure && yarn run verify:cli && yarn run verify:loader && yarn run verify:licenses')
+    expect(manifest.scripts?.['check:source']).not.toContain('verify:profile')
+    expect(manifest.scripts?.check).toBe('yarn run prepare:python && yarn run check:source && yarn run verify:profile')
   })
 
   it('installs Host command PATHs after the launch snapshot and before profile boot', () => {
@@ -333,7 +336,7 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run verify:closure')
     expect(manifest.scripts?.['test:windows-update-transaction']).toBeUndefined()
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
-    expect(manifest.scripts?.check).toContain('yarn run verify:cli')
+    expect(manifest.scripts?.['check:source']).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac']).toBe('yarn workspace @e-mate/desktop dist:mac')
     expect(workspaceManifest.scripts?.['dist:mac-unsigned-release']).toBeUndefined()
     expect(workspaceManifest.scripts?.['dist:mac-smoke']).toBeUndefined()
@@ -485,6 +488,34 @@ describe('published package surface', () => {
     expect(manifest.dependencies).not.toHaveProperty('dsh-better-sidebar')
     expect(workspaceManifest.resolutions).not.toHaveProperty('node-pty@npm:^1.1.0')
     expect(lockfile).not.toContain('dsh-better-sidebar@')
+  })
+
+  it('binds empty machine patch handling to the pinned rc.7 app-boot patch', () => {
+    const patchResolution = 'patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.0-rc.7#./patches/dsh-app-boot@0.1.0-rc.7.patch'
+    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+    const patch = readFileSync(new URL('patches/dsh-app-boot@0.1.0-rc.7.patch', workspaceRoot), 'utf8')
+
+    expect(workspaceManifest.resolutions).toMatchObject({
+      '@deepseek-ai/dsh-app-boot@npm:0.1.0-rc.7': patchResolution,
+      '@deepseek-ai/dsh-app-boot@npm:^0.1.0-rc.7': patchResolution,
+    })
+    expect(patch).toBe([
+      'diff --git a/lib/index.js b/lib/index.js',
+      'index 8bca7aa8e26ef9c9f1495061d2e91ff89ebf434a..32c9f77f20af88f0606f75afd9fdf88126c91d90 100644',
+      '--- a/lib/index.js',
+      '+++ b/lib/index.js',
+      '@@ -840 +840,2 @@ function parsePatchList(binName, file, content, label) {',
+      '-\tif (!Array.isArray(parsed)) throw new Error(\`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries\`);',
+      '+\tif (parsed === void 0 || parsed === null) return [];',
+      '+\tif (!Array.isArray(parsed)) throw new Error(\`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries\`);',
+      '',
+    ].join('\n'))
+    expect(lockfile).toContain(
+      '"@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.0-rc.7#./patches/dsh-app-boot@0.1.0-rc.7.patch::locator=%40e-mate%2Fdesktop-workspace%40workspace%3A.":',
+    )
+    expect(lockfile).toContain(
+      'resolution: "@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.0-rc.7#./patches/dsh-app-boot@0.1.0-rc.7.patch::version=0.1.0-rc.7&hash=d4ccf8&locator=%40e-mate%2Fdesktop-workspace%40workspace%3A."',
+    )
   })
 
   it('keeps the pinned app-builder patch free of local NSIS changes', () => {

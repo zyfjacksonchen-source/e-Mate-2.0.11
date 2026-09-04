@@ -1,5 +1,6 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 
 const FS_OLD = `\tasync resolvePolicy(toolName, args, exec) {
 \t\tvalidateEscalationArgs(args.sandbox_permissions, args.justification);
@@ -20,8 +21,24 @@ export function adaptHarnessFsSource(source) {
   return source.replace(FS_OLD, FS_NEW)
 }
 
+async function replaceRuntimeFile(target, source) {
+  const { mode } = await stat(target)
+  // pnpm deploy can hardlink this entry to the pinned checkout.
+  const temporaryDirectory = await mkdtemp(`${target}.emate-adapter-`)
+  try {
+    const temporary = join(temporaryDirectory, 'output')
+    await writeFile(temporary, source)
+    await chmod(temporary, mode)
+    await rename(temporary, target)
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true })
+  }
+}
+
 export async function applyHarnessRuntimeAdapters(runtimeRoot) {
   const packageEntry = name => join(runtimeRoot, 'node_modules', '@deepseek-ai', name, 'lib', 'index.js')
   const fsTarget = packageEntry('dsh-tool-fs')
-  await writeFile(fsTarget, adaptHarnessFsSource(await readFile(fsTarget, 'utf8')))
+  await replaceRuntimeFile(fsTarget, adaptHarnessFsSource(await readFile(fsTarget, 'utf8')))
+  const conversationTarget = join(runtimeRoot, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')
+  await replaceRuntimeFile(conversationTarget, adaptHarnessConversationSource(await readFile(conversationTarget, 'utf8')))
 }

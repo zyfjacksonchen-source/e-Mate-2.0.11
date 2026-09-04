@@ -1,13 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
+import { setTimeout as wait } from 'node:timers/promises'
 import { zipSync } from 'fflate'
 import { loadTargetLlm, loadTargetStorageDomain, loadTargetTools } from './target-runtime.js'
+import { imageBatchParameters, imageBatchResultSchema } from './image-batch.ts'
+import { imageBatchProjectionDefinition } from './image-batch-events.ts'
+import { createNativeImageTaskRuntime } from './native-image-task-runner.ts'
+import { installImageBatchRecovery, readDurableImageBatchResult } from './image-batch-recovery.ts'
 
 export const name = 'emate-image-generation'
 export const inject = [
   'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
-  'sessionProjectionCache', 'sessionPersistence',
+  'sessionProjectionCache', 'sessionPersistence', 'sessions', 'subagents',
   'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
 ]
 
@@ -68,6 +73,14 @@ const MAX_EDIT_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_PACK_IMAGES = 100
 const MAX_PACK_BYTES = 100 * 1024 * 1024
 const IMAGE_TIMEOUT_MS = 610_000
+// Admission retries are deliberately local, fixed, and well inside the owning Tool timeout.
+const IMAGE_ADMISSION_MAX_ATTEMPTS = 3
+const IMAGE_ADMISSION_WAIT_BUDGET_MS = 30_000
+const MAX_ADMISSION_ERROR_BYTES = 16 * 1024
+const MIN_GATEWAY_RETRY_AFTER_MS = 1_000
+const MAX_GATEWAY_RETRY_AFTER_MS = 3_600_000
+const MAX_EDIT_MULTIPART_BYTES = MAX_EDIT_IMAGES * MAX_EDIT_IMAGE_BYTES + MAX_PROMPT_CHARS * 4 + 256 * 1024
+const IMAGE_BATCH_TIMEOUT_MS = IMAGE_TIMEOUT_MS * 8 + 120_000
 const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
@@ -138,12 +151,10 @@ function sessionIdentity(agent) {
   return id
 }
 
-function verifier(operation, reviewDecision) {
+function verifier(operation, status) {
   return {
     structural: 'attachment-cas-v1',
-    semantic: operation === 'generate'
-      ? 'not-required'
-      : reviewDecision === undefined ? 'not-configured' : 'native-user-confirmation-v1',
+    semantic: operation === 'generate' || status === 'completed' ? 'not-required' : 'not-configured',
   }
 }
 
@@ -195,6 +206,47 @@ async function readBounded(response, maximum, label) {
   }
   if (declared !== null && length !== Number(declared)) throw new Error(`${label} Content-Length does not match the body`)
   return Buffer.concat(chunks.map(chunk => Buffer.from(chunk)), length)
+}
+
+class GatewayAdmissionError extends Error {
+  constructor(code, retryAfterMs, retryable) {
+    super(`e-Mate image request failed with HTTP 429 (${code})`)
+    this.code = code
+    this.retryAfterMs = retryAfterMs
+    this.retryable = retryable
+    this.definitelyNotSubmitted = true
+  }
+}
+
+async function gatewayAdmissionResult(response) {
+  if (response.status !== 429
+    || response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+    return { kind: 'other' }
+  }
+  let value
+  try {
+    value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(
+      await readBounded(response, MAX_ADMISSION_ERROR_BYTES, 'e-Mate image admission'),
+    ))
+  } catch {
+    return { kind: 'malformed' }
+  }
+  if (!exactKeys(value, ['error']) || !isRecord(value.error)
+    || !exactKeys(value.error, ['code', 'message', 'retryAfterMs'])) return { kind: 'malformed' }
+  const { code, message, retryAfterMs } = value.error
+  if (!['TENANT_REQUEST_RATE_LIMITED', 'TENANT_CONCURRENCY_LIMITED', 'USER_TOKEN_LIMIT_REACHED'].includes(code)
+    || typeof message !== 'string' || message.length < 1 || message.length > 256 || /[\u0000-\u001f\u007f]/u.test(message)
+    || !Number.isSafeInteger(retryAfterMs)
+    || retryAfterMs < MIN_GATEWAY_RETRY_AFTER_MS || retryAfterMs > MAX_GATEWAY_RETRY_AFTER_MS
+    || response.headers.get('retry-after') !== String(Math.ceil(retryAfterMs / 1_000))) return { kind: 'malformed' }
+  return {
+    kind: 'admission',
+    error: new GatewayAdmissionError(
+      code,
+      retryAfterMs,
+      code === 'TENANT_REQUEST_RATE_LIMITED' || code === 'TENANT_CONCURRENCY_LIMITED',
+    ),
+  }
 }
 
 async function responseJson(response, maximum, label) {
@@ -249,34 +301,6 @@ function imageOperation(refs) {
   return refs.length === 0 ? 'generate' : refs.length === 1 ? 'edit' : 'fusion'
 }
 
-function sha256Text(value) {
-  return createHash('sha256').update(value).digest('hex')
-}
-
-function textReplacementAcceptance(prompt, status = 'needs-review') {
-  const patterns = [
-    /(?:共\s*)?(\d+)\s*处\s*[“"']?([^“”"'，。,.;]{1,32})[”"']?\s*(?:全部)?\s*(?:改为|改成|替换为|换成)\s*[“"']?([^“”"'，。,.;]{1,32})/iu,
-    /(?:把|将)?\s*(?:图片|图像|图)?(?:中|里|上)(?:的)?\s*[“"']?([^“”"'，。,.;]{1,32})[”"']?\s*(?:全部)?\s*(?:改为|改成|替换为|换成)\s*[“"']?([^“”"'，。,.;]{1,32})/iu,
-    /\breplace\s+[“"']?([^“”"'\n]{1,64})[”"']?\s+with\s+[“"']?([^“”"'\n]{1,64})/iu,
-  ]
-  for (const [index, pattern] of patterns.entries()) {
-    const match = pattern.exec(prompt)
-    if (match === null) continue
-    const offset = index === 0 ? 1 : 0
-    const oldText = match[1 + offset]?.trim()
-    const newText = match[2 + offset]?.trim()
-    if (!oldText || !newText || oldText === newText) return undefined
-    const requested = index === 0 ? Number(match[1]) : null
-    return {
-      old_text_sha256: sha256Text(oldText),
-      new_text_sha256: sha256Text(newText),
-      requested_regions: Number.isSafeInteger(requested) && requested > 0 ? requested : null,
-      status,
-    }
-  }
-  return undefined
-}
-
 function failureCode(error, submitted, aborted) {
   if (aborted) return 'cancelled'
   if (error?.code === 'agent-tool-unavailable') return 'agent-tool-unavailable'
@@ -287,7 +311,8 @@ function failureCode(error, submitted, aborted) {
 }
 
 function requestDefinitelyRejected(error) {
-  return /HTTP 413(?:\D|$)/u.test(error instanceof Error ? error.message : String(error))
+  return error?.definitelyNotSubmitted === true
+    || /HTTP 413(?:\D|$)/u.test(error instanceof Error ? error.message : String(error))
 }
 
 function failedReceipt(
@@ -375,35 +400,17 @@ function assertFreshParentCall(agent, callId) {
   throw new Error('image call already has a terminal receipt; use a new explicit retry Tool call')
 }
 
-function imageResultStatus(refs, value, reviewDecision) {
-  const operation = imageOperation(refs)
-  if (operation === 'generate') return 'completed'
-  if (refs.some(ref => ref.attachmentId === value.image.attachmentId)) return 'failed'
-  return reviewDecision === 'accepted' ? 'completed' : reviewDecision === 'rejected' ? 'failed' : 'needs-review'
+function imageResultStatus(refs, value) {
+  return refs.some(ref => ref.attachmentId === value.image.attachmentId) ? 'failed' : 'completed'
 }
 
-function verifiedReceipt(
-  callId,
-  task,
-  refs,
-  value,
-  jobId,
-  parentSessionId,
-  clientRequestId,
-  reviewDecision,
-  revision = 2,
-) {
+function verifiedReceipt(callId, refs, value, jobId, parentSessionId, clientRequestId) {
   const operation = imageOperation(refs)
   const sameSource = refs.some(ref => ref.attachmentId === value.image.attachmentId)
-  const status = imageResultStatus(refs, value, reviewDecision)
-  const semantic = operation === 'generate'
-    ? 'not-applicable'
-    : sameSource || reviewDecision === 'rejected' ? 'failed'
-      : reviewDecision === 'accepted' ? 'passed' : 'needs-review'
-  const textReplacement = operation === 'generate' ? undefined : textReplacementAcceptance(task.prompt, semantic)
+  const status = imageResultStatus(refs, value)
   return {
     schema_version: IMAGE_RECEIPT_VERSION,
-    revision,
+    revision: 2,
     call_id: String(callId),
     operation,
     status,
@@ -416,82 +423,13 @@ function verifiedReceipt(
     client_request_id: clientRequestId,
     model: value.model,
     output: imageRef(value.image),
-    verifier: verifier(operation, reviewDecision),
+    verifier: verifier(operation, status),
     verification: {
       structural: 'passed',
       source_output: operation === 'generate' ? 'not-applicable' : sameSource ? 'same' : 'distinct',
-      semantic,
-      ...(reviewDecision === undefined ? {} : {
-        human_review: {
-          decision: reviewDecision,
-          requirement_sha256: sha256Text(task.prompt),
-        },
-      }),
-      ...(textReplacement === undefined ? {} : { text_replacement: textReplacement }),
+      semantic: sameSource ? 'failed' : 'not-applicable',
     },
-    ...(sameSource
-      ? { failure_code: 'source-output-same-sha256' }
-      : reviewDecision === 'rejected' ? { failure_code: 'user-rejected' } : {}),
-  }
-}
-
-async function reviewImageCandidate(
-  ctx,
-  owner,
-  callId,
-  task,
-  refs,
-  value,
-  jobId,
-  parentSessionId,
-  clientRequestId,
-  signal,
-) {
-  const candidate = verifiedReceipt(
-    callId, task, refs, value, jobId, parentSessionId, clientRequestId,
-  )
-  appendImageReceipt(owner, candidate)
-  const userQuestions = ctx.get('userQuestions')
-  if (userQuestions === undefined) return undefined
-  const approve = '确认结果'
-  const reject = '拒绝结果'
-  const questionId = `image-review-${jobId}`
-  const sources = refs.map(imageRef)
-  const output = imageRef(value.image)
-  const detail = [
-    '修改目标：',
-    task.prompt,
-    '',
-    '图片对照信息：',
-    ...sources.map((source, index) => `- 源图 ${index + 1}：${source.name ?? '未命名图片'}（${source.width}×${source.height}）`),
-    `- 候选结果：${output.name ?? '改图候选'}（${output.width}×${output.height}）`,
-    '- 系统已确认候选文件与源文件不同；修改语义仍需你对照图片确认。',
-  ].join('\n')
-  try {
-    const answer = await userQuestions.ask({
-      agent: owner,
-      signal,
-      questions: [{
-        id: questionId,
-        header: '改图结果确认',
-        question: '请对照源图确认候选结果是否完整完成修改目标。',
-        detail,
-        options: [
-          { label: approve, description: '确认候选图已完整满足修改目标。' },
-          { label: reject, description: '结果不正确；本次任务失败，可显式重新修改。' },
-        ],
-        intent: { kind: 'image-review', approve, sources, output },
-      }],
-    })
-    const selected = answer?.answers?.find(item => item?.id === questionId)
-    return selected?.custom === undefined
-      && selected?.selected?.length === 1
-      && selected.selected[0] === approve
-      ? 'accepted'
-      : 'rejected'
-  } catch (error) {
-    if (signal.aborted) throw error
-    return undefined
+    ...(sameSource ? { failure_code: 'source-output-same-sha256' } : {}),
   }
 }
 
@@ -524,8 +462,9 @@ function validVerification(value, operation, status, sameSource) {
       return humanReview === undefined && value.structural === 'passed'
         && value.source_output === 'not-applicable' && value.semantic === 'not-applicable'
     }
-    return !sameSource && humanReview?.decision === 'accepted'
-      && value.structural === 'passed' && value.source_output === 'distinct' && value.semantic === 'passed'
+    return !sameSource && value.structural === 'passed' && value.source_output === 'distinct'
+      && (humanReview?.decision === 'accepted' && value.semantic === 'passed'
+        || humanReview === undefined && value.semantic === 'not-applicable')
   }
   if (status === 'needs-review') {
     return operation !== 'generate' && !sameSource && humanReview === undefined && value.structural === 'passed'
@@ -566,8 +505,9 @@ function validReceiptV2(value, refs, parentSessionId, childSessionId) {
     || !exactKeys(value.verifier, ['semantic', 'structural'])
     || value.verifier.structural !== 'attachment-cas-v1'
     || value.verifier.semantic !== (value.operation === 'generate'
-      ? 'not-required'
-      : value.verification?.human_review === undefined ? 'not-configured' : 'native-user-confirmation-v1')
+      || value.status === 'completed' && value.verification?.human_review === undefined
+        ? 'not-required'
+        : value.verification?.human_review === undefined ? 'not-configured' : 'native-user-confirmation-v1')
     || value.failure_code !== undefined && (typeof value.failure_code !== 'string' || value.failure_code.length > 128)
     || value.job_id !== undefined && (typeof value.job_id !== 'string' || value.job_id.length === 0)
     || value.provider_request_id !== undefined
@@ -700,6 +640,25 @@ function successfulSessionImage(agent, attachmentId) {
   throw new Error(`image attachment ${attachmentId} is not a successful current-session image output`)
 }
 
+/** Resolve one normalized source list through the parent catalog and Attachment CAS exactly once per ID. */
+export async function resolveBatchSources(ctx, parent, attachmentIds, signal) {
+  const refs = attachmentIds.map(id => successfulSessionImage(parent, id))
+  const resolved = []
+  for (const ref of refs) {
+    signal.throwIfAborted()
+    if (!MEDIA_TYPES.has(ref.mediaType) || ref.bytes > MAX_EDIT_IMAGE_BYTES) {
+      throw new Error('image batch source attachment is unsupported or oversized')
+    }
+    const stored = await ctx.attachments.readImage(ref, signal)
+    if (!sameImageRef(stored.ref, ref) || !(stored.data instanceof Uint8Array)
+      || stored.data.byteLength !== ref.bytes || stored.data.byteLength > MAX_EDIT_IMAGE_BYTES) {
+      throw new Error('image batch source no longer matches its Attachment CAS receipt')
+    }
+    resolved.push(Object.freeze(imageRef(stored.ref)))
+  }
+  return Object.freeze(resolved)
+}
+
 function latestUserMessage(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.source?.kind === 'user') return messages[index]
@@ -768,7 +727,7 @@ function attemptedImageOperation(args) {
   return Array.isArray(args.image_url) && args.image_url.length > 1 ? 'fusion' : 'edit'
 }
 
-const NATIVE_BATCH_ERROR = 'parent image batch rejected before provider submission: use at most four sibling native subagent calls with run_in_background: false; never call imagegen directly for two or more independent new images'
+const NATIVE_BATCH_ERROR = 'parent image batch rejected before provider submission: use image_batch once; never call imagegen directly for two or more independent new images'
 const NATIVE_BATCH_SHAPE_ERROR = 'imagegen cannot verify its owning native assistant/message; refusing provider submission'
 
 function assertNativeImageBatchBoundary(agent, callId) {
@@ -931,19 +890,25 @@ function detectedImage(data) {
   throw new Error('e-Mate image result is not PNG, JPEG, or WebP')
 }
 
-function requestScope(exec) {
+function requestScope(exec, batchClaim) {
   const sessionId = String(exec.agent?.session?.header?.id ?? exec.agent?.id ?? '')
   const callId = String(exec.callId ?? '')
   if (sessionId.length === 0 || callId.length === 0) throw new Error('image generation requires a stable e-Mate Tool scope')
-  const id = createHash('sha256').update(sessionId).update('\0').update(callId).digest('hex').slice(0, 32)
+  const id = batchClaim === undefined
+    ? createHash('sha256').update(sessionId).update('\0').update(callId).digest('hex').slice(0, 32)
+    : batchClaim.taskId.slice('sha256:'.length)
   const clientRequestId = `image-${id}`
   return {
     clientRequestId,
     headers: {
-      'x-e-mate-task-id': clientRequestId,
+      'x-e-mate-task-id': batchClaim?.taskId ?? clientRequestId,
       'x-e-mate-trace-id': clientRequestId,
       session_id: clientRequestId,
       'x-client-request-id': clientRequestId,
+      ...(batchClaim === undefined ? {} : {
+        'x-e-mate-batch-id': batchClaim.batchId,
+        'x-e-mate-batch-ordinal': String(batchClaim.ordinal),
+      }),
     },
   }
 }
@@ -952,17 +917,15 @@ function createImageClient({ request, root, attachments }) {
   const imageLimit = Math.min(attachments.imageLimits.maxImageBytes, attachments.imageLimits.maxMessageImageBytes)
   const responseLimit = Math.ceil(imageLimit * 4 / 3) + 256 * 1024
 
-  async function execute(task, refs, signal, scope, onSubmit, onProviderResponse) {
+  async function execute(task, refs, signal, scope, onPossiblySubmitted, onProviderResponse) {
     signal.throwIfAborted()
-    const headers = new Headers({ accept: 'application/json', ...scope })
-    let body
-    let path
-    if (refs.length === 0) {
-      path = '/images/generations'
-      headers.set('content-type', 'application/json')
-      body = JSON.stringify({ model: IMAGE_MODEL, prompt: task.prompt })
-    } else {
-      path = '/images/edits'
+    const startedAt = Date.now()
+    const path = refs.length === 0 ? '/images/generations' : '/images/edits'
+    const label = `e-Mate image ${refs.length === 0 ? 'generation' : 'edit'}`
+    const jsonBody = refs.length === 0 ? JSON.stringify({ model: IMAGE_MODEL, prompt: task.prompt }) : undefined
+    let editBody
+    let editContentType
+    if (refs.length > 0) {
       const form = new FormData()
       form.set('model', IMAGE_MODEL)
       form.set('prompt', task.prompt)
@@ -981,13 +944,46 @@ function createImageClient({ request, root, attachments }) {
         const extension = ref.mediaType === 'image/png' ? 'png' : ref.mediaType === 'image/jpeg' ? 'jpg' : 'webp'
         form.append(field, new Blob([new Uint8Array(stored.data)], { type: ref.mediaType }), `image-${index + 1}.${extension}`)
       }
-      body = form
+      const encoded = new Request('https://localhost/', { method: 'POST', body: form })
+      editContentType = encoded.headers.get('content-type')
+      if (editContentType === null || !/^multipart\/form-data; boundary=[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(editContentType)) {
+        throw new Error('e-Mate image edit multipart encoding is invalid')
+      }
+      editBody = new Uint8Array(await encoded.arrayBuffer())
+      if (editBody.byteLength < 1 || editBody.byteLength > MAX_EDIT_MULTIPART_BYTES) {
+        throw new Error('e-Mate image edit request exceeds the encoded byte boundary')
+      }
     }
-    signal.throwIfAborted()
-    onSubmit()
-    const value = await responseJson(await request(endpoint(root, path), {
-      method: 'POST', headers, body, redirect: 'error', signal,
-    }), responseLimit, `e-Mate image ${refs.length === 0 ? 'generation' : 'edit'}`)
+    const body = () => jsonBody ?? new Uint8Array(editBody)
+    let value
+    for (let attempt = 1; attempt <= IMAGE_ADMISSION_MAX_ATTEMPTS; attempt += 1) {
+      signal.throwIfAborted()
+      const headers = new Headers({ accept: 'application/json', ...scope })
+      headers.set('content-type', jsonBody === undefined ? editContentType : 'application/json')
+      let response
+      try {
+        response = await request(endpoint(root, path), {
+          method: 'POST', headers, body: body(), redirect: 'error', signal,
+        })
+      } catch (error) {
+        onPossiblySubmitted()
+        throw error
+      }
+      const admission = await gatewayAdmissionResult(response)
+      if (admission.kind === 'other') {
+        onPossiblySubmitted()
+        value = await responseJson(response, responseLimit, label)
+        break
+      }
+      if (admission.kind === 'malformed') {
+        onPossiblySubmitted()
+        throw new Error(`${label} failed with HTTP 429`)
+      }
+      const error = admission.error
+      const remaining = IMAGE_ADMISSION_WAIT_BUDGET_MS - (Date.now() - startedAt)
+      if (!error.retryable || attempt === IMAGE_ADMISSION_MAX_ATTEMPTS || error.retryAfterMs > remaining) throw error
+      await wait(error.retryAfterMs, undefined, { signal })
+    }
     if (!exactKeys(value, ['id', 'data', 'usage']) || typeof value.id !== 'string' || !IDENTIFIER.test(value.id)
       || !Array.isArray(value.data) || value.data.length !== 1 || !isRecord(value.usage)) {
       throw new Error('e-Mate image response is invalid')
@@ -1052,7 +1048,7 @@ function startImageJob(ctx, owner, execSignal, operation) {
             status: value.status === 'completed' ? 'completed' : 'failed',
             detail: value.status === 'completed'
               ? '1 image, 0 failures'
-              : value.status === 'needs-review' ? '1 image needs review' : 'image verification failed',
+              : 'image verification failed',
             output: JSON.stringify({
               image_count: value.status === 'completed' ? 1 : 0,
               failure_count: value.status === 'completed' ? 0 : 1,
@@ -1080,7 +1076,7 @@ const imageOutput = {
       job_id: { type: 'string', required: true },
       images: { type: 'array', required: true, items: { type: 'json' } },
       failures: { type: 'array', required: true, items: { type: 'json' } },
-      status: { type: 'string', required: true, enum: ['completed', 'needs-review'] },
+      status: { type: 'string', required: true, enum: ['completed'] },
       receipt: { type: 'json', required: true },
     },
   },
@@ -1089,9 +1085,7 @@ const imageOutput = {
     const fileName = receiptImageName(image.name) ?? `e-Mate-image.${imageExtension(image.mediaType)}`
     return [{
       type: 'text',
-      text: value.status === 'completed'
-        ? `Image generation completed: 1 image (${fileName}).`
-        : `Image edit saved: 1 image (${fileName}) awaiting human confirmation.`,
+      text: `Image generation completed: 1 image (${fileName}).`,
     }]
   },
   presentationMeta: (_args, value) => {
@@ -1104,53 +1098,20 @@ const imageOutput = {
       width: image.width,
       height: image.height,
     }
-    if (value.status === 'completed') {
-      return {
-        $eMateDeliverables: {
-          schema_version: 1,
-          items: [{
-            kind: 'image',
-            name: image.name ?? `e-Mate-image.${imageExtension(image.mediaType)}`,
-            mime: image.mediaType,
-            size: image.bytes,
-            sha256: image.attachmentId.slice('sha256:'.length),
-            locator,
-          }],
-        },
-      }
-    }
     return {
       $eMateDeliverables: {
-        schema_version: 2,
-        items: [],
-        review_candidates: [{
+        schema_version: 1,
+        items: [{
           kind: 'image',
-          operation: value.receipt.operation,
-          reason: 'semantic-verifier-unavailable',
-          name: `e-Mate-image-review.${imageExtension(image.mediaType)}`,
+          name: image.name ?? `e-Mate-image.${imageExtension(image.mediaType)}`,
           mime: image.mediaType,
           size: image.bytes,
           sha256: image.attachmentId.slice('sha256:'.length),
           locator,
-          sources: value.receipt.sources.map(source => ({
-            kind: 'image-attachment',
-            attachment_id: source.attachmentId,
-            media_type: source.mediaType,
-            bytes: source.bytes,
-            width: source.width,
-            height: source.height,
-          })),
         }],
       },
     }
   },
-}
-
-function finalReceiptRevision(agent, callId) {
-  return agent.session.events.some(event => event?.type === 'emate/image-output'
-    && event.data?.call_id === String(callId)
-    && event.data?.revision === 2
-    && event.data?.status === 'needs-review') ? 3 : 2
 }
 
 const imagePackOutput = {
@@ -1238,7 +1199,13 @@ export async function apply(ctx, config = {}) {
     loadTargetStorageDomain(bindingPath),
   ])
   ctx.sessionProjections.register(imageReceiptsProjectionDefinition(z))
+  ctx.sessionProjections.register(imageBatchProjectionDefinition(z))
+  const nativeImageTasks = createNativeImageTaskRuntime(ctx, {
+    resolveSources: (parent, attachmentIds, signal) => resolveBatchSources(ctx, parent, attachmentIds, signal),
+    readDurableResult: (parent, batchId, signal) => readDurableImageBatchResult(ctx, parent, batchId, signal),
+  })
   await hydrateImageReceiptProjections(ctx)
+  await installImageBatchRecovery(ctx)
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
@@ -1254,7 +1221,7 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2-pro route. HARD BATCH BOUNDARY: for two or more mutually independent new images, a parent Agent must not call imagegen at all and must never emit multiple imagegen calls in one assistant message, even when asked for parallel/concurrent imagegen; it must use at most four sibling native subagent calls with run_in_background: false. A delegated child may call imagegen exactly once for its one new image. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple independent edits, make separate imagegen calls one at a time and pass exactly one source ID to each call. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
+    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2-pro route. For two or more mutually independent new images, use image_batch once and do not call imagegen directly. A native image_batch child may call imagegen exactly once with its exact admitted arguments. For an edit, copy the exact sha256: current-session image attachment ID into image_url; never pass a Job ID, request ID, or URL. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
@@ -1268,6 +1235,8 @@ export async function apply(ctx, config = {}) {
     timeoutMs: IMAGE_TIMEOUT_MS,
     async execute(args, exec) {
       assertFreshParentCall(exec.agent, exec.callId)
+      const batchClaim = await nativeImageTasks.claim(exec.agent, args)
+      const batchScope = batchClaim === undefined ? undefined : requestScope(exec, batchClaim)
       const parentSessionId = sessionIdentity(exec.agent)
       let operation = attemptedImageOperation(args)
       let refs = []
@@ -1281,7 +1250,7 @@ export async function apply(ctx, config = {}) {
         }
         exec.signal.throwIfAborted()
         task = normalizeTask(args)
-        task.attachmentIds = implicitEditImages(exec.agent, task)
+        task.attachmentIds = batchClaim === undefined ? implicitEditImages(exec.agent, task) : task.attachmentIds
         operation = imageOperation(task.attachmentIds)
         refs = task.attachmentIds.map(id => sessionImage(exec.agent, id))
       } catch (error) {
@@ -1294,7 +1263,7 @@ export async function apply(ctx, config = {}) {
           failureCode(error, false, exec.signal.aborted),
           parentSessionId,
           undefined,
-          undefined,
+          batchScope?.clientRequestId,
           undefined,
           2,
         ))
@@ -1302,15 +1271,15 @@ export async function apply(ctx, config = {}) {
       }
 
       appendImageReceipt(exec.agent, runningReceipt(exec.callId, operation, refs, parentSessionId))
-      let submitted = false
+      let ambiguousDispatch = false
       let started
       let terminalJob
-      let clientRequestId
+      let clientRequestId = batchScope?.clientRequestId
       let providerRequestId
       try {
         await modelPolicy.assertModel(IMAGE_MODEL)
         exec.signal.throwIfAborted()
-        const scope = requestScope(exec)
+        const scope = batchScope ?? requestScope(exec, undefined)
         clientRequestId = scope.clientRequestId
         started = startImageJob(ctx, exec.agent, exec.signal, async (signal) => {
           const value = await client.execute(
@@ -1318,26 +1287,10 @@ export async function apply(ctx, config = {}) {
             refs,
             signal,
             scope.headers,
-            () => { submitted = true },
+            () => { ambiguousDispatch = true },
             value => { providerRequestId = value },
           )
-          let reviewDecision
-          if (imageResultStatus(refs, value) === 'needs-review') {
-            if (started?.id === undefined) throw new Error('image Job identity is unavailable for native review')
-            reviewDecision = await reviewImageCandidate(
-              ctx,
-              exec.agent,
-              exec.callId,
-              task,
-              refs,
-              value,
-              started.id,
-              parentSessionId,
-              clientRequestId,
-              signal,
-            )
-          }
-          return { ...value, reviewDecision, status: imageResultStatus(refs, value, reviewDecision) }
+          return { ...value, status: imageResultStatus(refs, value) }
         })
         let image
         try {
@@ -1348,21 +1301,10 @@ export async function apply(ctx, config = {}) {
         }
         await ctx.jobs.wait(started.id, IMAGE_TIMEOUT_MS, exec.agent, exec.signal)
         const receipt = verifiedReceipt(
-          exec.callId,
-          task,
-          refs,
-          image,
-          started.id,
-          parentSessionId,
-          clientRequestId,
-          image.reviewDecision,
-          finalReceiptRevision(exec.agent, exec.callId),
+          exec.callId, refs, image, started.id, parentSessionId, clientRequestId,
         )
         appendImageReceipt(exec.agent, receipt)
         if (receipt.status === 'failed') {
-          if (receipt.failure_code === 'user-rejected') {
-            throw new Error('e-Mate image edit was rejected by the user; use a new explicit retry Tool call')
-          }
           throw new Error('e-Mate image edit verification failed because source and output have the same SHA-256')
         }
         return {
@@ -1373,7 +1315,7 @@ export async function apply(ctx, config = {}) {
           receipt,
         }
       } catch (error) {
-        const revision = finalReceiptRevision(exec.agent, exec.callId)
+        const revision = 2
         const alreadyRecorded = exec.agent.session.events.some(event => event?.type === 'emate/image-output'
           && event.data?.schema_version === IMAGE_RECEIPT_VERSION
           && event.data?.call_id === String(exec.callId)
@@ -1381,7 +1323,7 @@ export async function apply(ctx, config = {}) {
         if (!alreadyRecorded) {
           const aborted = exec.signal.aborted
           const definitelyRejected = providerRequestId === undefined && requestDefinitelyRejected(error)
-          const possiblySubmitted = submitted && !definitelyRejected
+          const possiblySubmitted = ambiguousDispatch && !definitelyRejected
           const cancelled = started?.signal.aborted === true || terminalJob?.status === 'killed' || aborted
           appendImageReceipt(exec.agent, failedReceipt(
             exec.callId,
@@ -1396,15 +1338,13 @@ export async function apply(ctx, config = {}) {
               : 'provider-result-uncommitted',
             parentSessionId,
             started?.id,
-            started === undefined ? undefined : clientRequestId,
+            batchScope?.clientRequestId ?? (started === undefined ? undefined : clientRequestId),
             providerRequestId,
             revision,
           ))
         }
-        if (error instanceof Error && [
-          'e-Mate image edit was rejected by the user; use a new explicit retry Tool call',
-          'e-Mate image edit verification failed because source and output have the same SHA-256',
-        ].includes(error.message)) throw error
+        if (error instanceof Error
+          && error.message === 'e-Mate image edit verification failed because source and output have the same SHA-256') throw error
         const status = exec.agent.session.events.findLast(event => event?.type === 'emate/image-output'
           && event.data?.call_id === String(exec.callId)
           && event.data?.status !== 'running')?.data?.status ?? 'failed'
@@ -1417,6 +1357,26 @@ export async function apply(ctx, config = {}) {
       kind: 'write',
       rawInput: args.prompt,
     }),
+  }))
+  const imageBatchOutput = {
+    schema: imageBatchResultSchema(),
+    render: (_args, value) => {
+      const names = value.images.map(item => item.attachment.name ?? 'e-Mate image').join(', ')
+      return [{ type: 'text', text: 'Image batch ' + value.status + ': '
+        + value.images.length + ' images' + (names === '' ? '' : ' (' + names + ')')
+        + ', ' + value.failures.length + ' failures.' }]
+    },
+  }
+  ctx.tools.register(defineTool({
+    name: 'image_batch',
+    description: 'Generate or edit 2 to 8 mutually independent images as one durable local batch. Each task has one non-empty prompt of at most 20,000 characters, optional ordered current-session image_url IDs, and produces exactly one image. Omitted or empty image_url means new image; one ID means edit; multiple IDs mean reference fusion. Optional concurrency is 1 to 4 and defaults to 3. Use imagegen instead for exactly one output.',
+    parameters: imageBatchParameters(),
+    output: imageBatchOutput,
+    isConcurrencySafe: () => false,
+    timeoutMs: IMAGE_BATCH_TIMEOUT_MS,
+    execute: (args, exec) => nativeImageTasks.execute(args, exec),
+    presentCall: args => ({ card: 'generic', title: 'Generate image batch', kind: 'write',
+      rawInput: Array.isArray(args?.tasks) ? String(args.tasks.length) + ' images' : 'image batch' }),
   }))
   ctx.tools.register(defineTool({
     name: 'image_pack',

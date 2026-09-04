@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://e-mate.local/schemas/2.0.17/image-batch.schema.json",
+  "title": "e-Mate image_batch input and durable parent events",
+  "description": "Schema 1 contract for the local image_batch Tool input and its ignorable append-only parent Session events. Prompt text exists only in Tool input, never in durable events.",
+  "oneOf": [{ "$ref": "#/$defs/toolInput" }, { "$ref": "#/$defs/event" }],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "derivedId": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "attachmentId": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nativeId": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\u0000-\u001f\u007f]+$" },
+    "timestamp": { "type": "string", "format": "date-time", "maxLength": 35 },
+    "imageUrl": {
+      "oneOf": [
+        { "$ref": "#/$defs/attachmentId" },
+        { "type": "array", "items": { "$ref": "#/$defs/attachmentId" }, "minItems": 0, "maxItems": 16 }
+      ]
+    },
+    "toolTask": {
+      "type": "object", "additionalProperties": false, "required": ["prompt"],
+      "properties": {
+        "prompt": { "type": "string", "minLength": 1, "maxLength": 20000, "pattern": "^[^\u0000]+$" },
+        "image_url": { "$ref": "#/$defs/imageUrl" }
+      }
+    },
+    "toolInput": {
+      "type": "object", "additionalProperties": false, "required": ["tasks"],
+      "properties": {
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/toolTask" }, "minItems": 2, "maxItems": 8 },
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 4, "default": 3 }
+      }
+    },
+    "receiptRef": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner_session_id", "call_id", "revision", "event_seq", "status"],
+      "properties": {
+        "owner_session_id": { "$ref": "#/$defs/nativeId" },
+        "call_id": { "$ref": "#/$defs/nativeId" },
+        "revision": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "event_seq": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "status": { "enum": ["completed", "needs-review", "failed", "cancelled", "unknown"] }
+      }
+    },
+    "taskSnapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["task_id", "ordinal", "revision", "state", "submission_status", "prompt_sha256", "image_url"],
+      "properties": {
+        "task_id": { "$ref": "#/$defs/derivedId" },
+        "ordinal": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "revision": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "state": { "enum": ["queued", "running", "needs-review", "completed", "failed", "cancelled", "unknown", "interrupted"] },
+        "submission_status": { "enum": ["not-submitted", "submitted", "unknown"] },
+        "prompt_sha256": { "$ref": "#/$defs/sha256" },
+        "image_url": { "type": "array", "items": { "$ref": "#/$defs/attachmentId" }, "maxItems": 16, "uniqueItems": true },
+        "child_session_id": { "$ref": "#/$defs/nativeId" },
+        "job_id": { "$ref": "#/$defs/nativeId" },
+        "receipt": { "$ref": "#/$defs/receiptRef" },
+        "failure_code": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "updated_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "createdTaskSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/taskSnapshot" },
+        {
+          "properties": { "revision": { "const": 1 }, "state": { "const": "queued" }, "submission_status": { "const": "not-submitted" } },
+          "not": { "anyOf": [{ "required": ["child_session_id"] }, { "required": ["job_id"] }, { "required": ["receipt"] }, { "required": ["failure_code"] }] }
+        }
+      ]
+    },
+    "taskLinkedSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/taskSnapshot" },
+        {
+          "required": ["child_session_id"],
+          "properties": {
+            "revision": { "type": "integer", "minimum": 2, "maximum": 2147483647 },
+            "state": { "const": "queued" },
+            "submission_status": { "const": "not-submitted" }
+          },
+          "not": { "anyOf": [{ "required": ["job_id"] }, { "required": ["receipt"] }, { "required": ["failure_code"] }] }
+        }
+      ]
+    },
+    "taskStateSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/taskSnapshot" },
+        {
+          "properties": { "state": { "enum": ["running", "needs-review", "completed", "failed", "cancelled", "unknown", "interrupted"] } },
+          "allOf": [
+            {
+              "if": { "properties": { "state": { "const": "running" } }, "required": ["state"] },
+              "then": { "required": ["child_session_id", "job_id"], "not": { "anyOf": [{ "required": ["receipt"] }, { "required": ["failure_code"] }] } }
+            },
+            {
+              "if": { "properties": { "state": { "enum": ["needs-review", "completed"] } }, "required": ["state"] },
+              "then": { "required": ["child_session_id", "job_id", "receipt"], "properties": { "submission_status": { "const": "submitted" } } }
+            },
+            {
+              "if": { "properties": { "state": { "const": "needs-review" } }, "required": ["state"] },
+              "then": { "properties": { "receipt": { "properties": { "status": { "const": "needs-review" } } } } }
+            },
+            {
+              "if": { "properties": { "state": { "const": "completed" } }, "required": ["state"] },
+              "then": { "properties": { "receipt": { "properties": { "status": { "const": "completed" } } } } }
+            },
+            {
+              "if": { "properties": { "state": { "enum": ["failed", "cancelled", "unknown", "interrupted"] } }, "required": ["state"] },
+              "then": { "required": ["failure_code"] }
+            },
+            {
+              "if": { "properties": { "state": { "const": "interrupted" } }, "required": ["state"] },
+              "then": { "properties": { "submission_status": { "const": "not-submitted" } } }
+            }
+          ]
+        }
+      ]
+    },
+    "terminalTaskSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/taskStateSnapshot" },
+        { "properties": { "state": { "enum": ["completed", "failed", "cancelled", "unknown", "interrupted"] } } }
+      ]
+    },
+    "eventBase": {
+      "type": "object",
+      "required": ["schema_version", "event_id", "kind", "batch_id", "parent_session_id", "parent_call_id", "occurred_at"],
+      "properties": {
+        "schema_version": { "const": 1 }, "event_id": { "$ref": "#/$defs/derivedId" },
+        "kind": { "enum": ["created", "task-linked", "task-state", "terminal"] },
+        "batch_id": { "$ref": "#/$defs/derivedId" }, "parent_session_id": { "$ref": "#/$defs/nativeId" },
+        "parent_call_id": { "$ref": "#/$defs/nativeId" }, "occurred_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "createdEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["schema_version", "event_id", "kind", "batch_id", "parent_session_id", "parent_call_id", "occurred_at", "concurrency", "tasks"],
+          "properties": {
+            "schema_version": { "const": 1 }, "event_id": { "$ref": "#/$defs/derivedId" }, "kind": { "const": "created" },
+            "batch_id": { "$ref": "#/$defs/derivedId" }, "parent_session_id": { "$ref": "#/$defs/nativeId" },
+            "parent_call_id": { "$ref": "#/$defs/nativeId" }, "occurred_at": { "$ref": "#/$defs/timestamp" },
+            "concurrency": { "type": "integer", "minimum": 1, "maximum": 4 },
+            "tasks": { "type": "array", "items": { "$ref": "#/$defs/createdTaskSnapshot" }, "minItems": 2, "maxItems": 8 }
+          }
+        }
+      ]
+    },
+    "taskLinkedEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["schema_version", "event_id", "kind", "batch_id", "parent_session_id", "parent_call_id", "occurred_at", "task"],
+          "properties": {
+            "schema_version": { "const": 1 }, "event_id": { "$ref": "#/$defs/derivedId" }, "kind": { "const": "task-linked" },
+            "batch_id": { "$ref": "#/$defs/derivedId" }, "parent_session_id": { "$ref": "#/$defs/nativeId" },
+            "parent_call_id": { "$ref": "#/$defs/nativeId" }, "occurred_at": { "$ref": "#/$defs/timestamp" },
+            "task": { "$ref": "#/$defs/taskLinkedSnapshot" }
+          }
+        }
+      ]
+    },
+    "taskStateEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["schema_version", "event_id", "kind", "batch_id", "parent_session_id", "parent_call_id", "occurred_at", "task"],
+          "properties": {
+            "schema_version": { "const": 1 }, "event_id": { "$ref": "#/$defs/derivedId" }, "kind": { "const": "task-state" },
+            "batch_id": { "$ref": "#/$defs/derivedId" }, "parent_session_id": { "$ref": "#/$defs/nativeId" },
+            "parent_call_id": { "$ref": "#/$defs/nativeId" }, "occurred_at": { "$ref": "#/$defs/timestamp" },
+            "task": { "$ref": "#/$defs/taskStateSnapshot" }
+          }
+        }
+      ]
+    },
+    "terminalEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["schema_version", "event_id", "kind", "batch_id", "parent_session_id", "parent_call_id", "occurred_at", "status", "tasks"],
+          "properties": {
+            "schema_version": { "const": 1 }, "event_id": { "$ref": "#/$defs/derivedId" }, "kind": { "const": "terminal" },
+            "batch_id": { "$ref": "#/$defs/derivedId" }, "parent_session_id": { "$ref": "#/$defs/nativeId" },
+            "parent_call_id": { "$ref": "#/$defs/nativeId" }, "occurred_at": { "$ref": "#/$defs/timestamp" },
+            "status": { "enum": ["completed", "partial", "failed", "cancelled"] },
+            "tasks": { "type": "array", "items": { "$ref": "#/$defs/terminalTaskSnapshot" }, "minItems": 2, "maxItems": 8 }
+          }
+        }
+      ]
+    },
+    "event": {
+      "oneOf": [
+        { "$ref": "#/$defs/createdEvent" }, { "$ref": "#/$defs/taskLinkedEvent" },
+        { "$ref": "#/$defs/taskStateEvent" }, { "$ref": "#/$defs/terminalEvent" }
+      ]
+    }
+  }
+}

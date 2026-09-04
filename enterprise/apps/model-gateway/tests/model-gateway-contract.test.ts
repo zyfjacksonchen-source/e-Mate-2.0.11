@@ -10,6 +10,7 @@ import {
   InvocationAdmissionError,
   PostgresUsageStore,
   PostgresTenantModelRoutePolicy,
+  type ModelGatewayOptions,
   type ModelGatewayPrincipal,
   type ModelGatewayRoute,
   type ProviderInvocationReceipt,
@@ -18,6 +19,8 @@ import {
   type UsageStore,
 } from '../src/index.ts';
 import { createProductionAuthenticator } from '../src/production.ts';
+import type { ImageObservation } from '../src/image-observability.ts';
+import { InvocationRequestConflictError } from '../src/server.ts';
 
 const sessionToken = 's'.repeat(64);
 const otherToken = 'o'.repeat(64);
@@ -161,6 +164,7 @@ test('production authentication rejects a signed session immediately after its s
   const authenticate = createProductionAuthenticator(
     async (token) => (token === sessionToken ? signedPrincipal : null),
     policy,
+    { activeModelIds: async (principal: ModelGatewayPrincipal) => principal.modelIds } as never,
     [route.id]
   );
 
@@ -182,6 +186,37 @@ test('production authentication rejects a signed session immediately after its s
   );
 });
 
+test('production authentication intersects signed scope with live user models and callable routes', async () => {
+  let signedModelIds = ['gpt-5.6-luna'];
+  let liveModelIds = ['gpt-5.6-luna', 'gpt-5.6-sol'];
+  const scopes: string[][] = [];
+  const authenticate = createProductionAuthenticator(
+    async () => ({
+      tenantId: 'tenant-a', userId: 'user-a', modelIds: [...signedModelIds], sessionId: 'session-1',
+    }),
+    { isUserSessionActive: async () => true } as never,
+    { activeModelIds: async (_principal: ModelGatewayPrincipal, routeIds: readonly string[]) => {
+      scopes.push([...routeIds]);
+      return routeIds.filter((routeId) => liveModelIds.includes(routeId));
+    } } as never,
+    ['gpt-5.6-luna', 'gpt-5.6-sol']
+  );
+
+  assert.deepEqual((await authenticate(sessionToken))?.modelIds, ['gpt-5.6-luna']);
+  liveModelIds = ['gpt-5.6-sol'];
+  assert.equal(await authenticate(sessionToken), null);
+  signedModelIds = ['gpt-5.6-luna', 'gpt-5.6-sol'];
+  assert.deepEqual((await authenticate(sessionToken))?.modelIds, ['gpt-5.6-sol']);
+  liveModelIds = [];
+  assert.equal(await authenticate(sessionToken), null);
+  assert.deepEqual(scopes, [
+    ['gpt-5.6-luna'],
+    ['gpt-5.6-luna'],
+    ['gpt-5.6-luna', 'gpt-5.6-sol'],
+    ['gpt-5.6-luna', 'gpt-5.6-sol'],
+  ]);
+});
+
 test('production client authentication never authorizes the search credential route as a model', async () => {
   const allowedRouteIds: string[][] = [];
   const authenticate = createProductionAuthenticator(
@@ -192,6 +227,7 @@ test('production client authentication never authorizes the search credential ro
         return null;
       },
     } as never,
+    { activeModelIds: async () => [] } as never,
     [route.id, searchCredentialRoute.id]
   );
 
@@ -254,7 +290,9 @@ function tokenLimitUsageStore(state: TokenLimitTestState): PostgresUsageStore {
       }
       if (statement.startsWith('SELECT invocation_id') && statement.includes("status = 'PREPARED'")) {
         return {
-          rows: state.replay === 'PENDING' ? [{ invocation_id: 'pending-invocation' }] : [],
+          rows: state.replay === 'PENDING'
+            ? [{ invocation_id: 'pending-invocation', request_digest: postgresInvocationFact.requestDigest }]
+            : [],
         };
       }
       if (statement.startsWith('SELECT invocation_id') && statement.includes("status = 'COMPLETED'")) {
@@ -358,6 +396,30 @@ test('returns pending and recorded idempotent replays without consulting a reach
   );
 });
 
+test('Postgres admission conflicts a pending task with a different request digest', async () => {
+  const state: TokenLimitTestState = {
+    replay: 'PENDING',
+    tokenLimit: '0',
+    usedTokens: '999',
+    statements: [],
+    quotaUpdates: 0,
+    invocationInserts: 0,
+  };
+  await assert.rejects(
+    tokenLimitUsageStore(state).prepare({ ...postgresInvocationFact, requestDigest: 'x'.repeat(43) }),
+    /request digest changed/
+  );
+  assert.equal(state.statements.at(-1), 'ROLLBACK');
+  assert.equal(state.statements.filter((statement) => statement === 'ROLLBACK').length, 1);
+  assert.equal(state.statements.includes('COMMIT'), false);
+  assert.equal(state.statements.some((statement) => statement.includes('token_limit')), false);
+  assert.equal(state.statements.some((statement) => statement.startsWith('SELECT count(*) AS active')), false);
+  assert.equal(state.statements.some((statement) => statement.startsWith('UPDATE e_mate_model_quota_state')), false);
+  assert.equal(state.statements.some((statement) => statement.startsWith('INSERT INTO e_mate_model_invocation')), false);
+  assert.equal(state.quotaUpdates, 0);
+  assert.equal(state.invocationInserts, 0);
+});
+
 function principal(tenantId: string, userId: string, modelId = route.id): ModelGatewayPrincipal {
   return { tenantId, userId, modelIds: [modelId] };
 }
@@ -419,7 +481,8 @@ async function withGateway(
   gatewayLimits = limits,
   gatewayRoute: ModelGatewayRoute = route,
   tenantModelRoutePolicy?: TenantModelRoutePolicy,
-  usageStore: UsageStore = new InMemoryUsageStore(gatewayLimits)
+  usageStore: UsageStore = new InMemoryUsageStore(gatewayLimits),
+  imageObservation?: ModelGatewayOptions['imageObservation']
 ): Promise<void> {
   const upstreamRequests: Request[] = [];
   const consentStore = new InMemoryConsentStore(consentPolicy);
@@ -442,6 +505,7 @@ async function withGateway(
     usagePrivateKey: privateKey,
     reconcileProviderInvocation,
     upstreamTimeoutMs,
+    imageObservation,
     fetchImplementation: async (input, init) => {
       const upstreamRequest = new Request(input, init);
       upstreamRequests.push(upstreamRequest);
@@ -542,6 +606,18 @@ test('ingests strict direct-runtime audit batches idempotently without inference
         body: JSON.stringify({ schema_version: 1, records: [auditUsageRecord(2)], extra: true }),
       });
       assert.equal(unknownField.status, 400);
+      for (const [field, secret] of [
+        ['prompt', 'private prompt'],
+        ['image', 'private image bytes'],
+        ['b64_json', 'cHJpdmF0ZS1pbWFnZQ=='],
+        ['api_key', 'private-provider-secret'],
+      ]) {
+        const sensitive = await upload([{ ...auditUsageRecord(40), [field]: secret }]);
+        assert.equal(sensitive.status, 400);
+        const error = JSON.stringify(await sensitive.json());
+        assert.match(error, /INVALID_AUDIT_USAGE/);
+        assert.equal(error.includes(secret), false);
+      }
       assert.equal((await upload(Array.from({ length: 65 }, (_, index) => auditUsageRecord(index + 10)))).status, 400);
       assert.equal((await fetch(`${baseUrl}/v1/audit/usage`, { headers: auth() })).status, 405);
 
@@ -1280,11 +1356,12 @@ function imageRequest(
     model: imageRoute.id,
     prompt: 'A blue circle on white.',
     size: '1024x1024',
-  }
+  },
+  headers = responseHeaders()
 ): Promise<Response> {
   return fetch(`${baseUrl}/v1/images/generations`, {
     method: 'POST',
-    headers: responseHeaders(),
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -1629,6 +1706,137 @@ test('keeps an interrupted Chat Completions invocation pending without upstream 
   );
 });
 
+
+
+test('correlates batch image stages and rejects mismatched optional scope before provider submission', async () => {
+  const observations: ImageObservation[] = [];
+  const taskId = 'sha256:' + 'a'.repeat(64);
+  const traceId = 'image-' + 'a'.repeat(64);
+  const batchId = 'sha256:' + 'b'.repeat(64);
+  const headers = {
+    ...responseHeaders(),
+    session_id: traceId,
+    'x-client-request-id': traceId,
+    'x-e-mate-task-id': taskId,
+    'x-e-mate-trace-id': traceId,
+    'x-e-mate-batch-id': batchId,
+    'x-e-mate-batch-ordinal': '2',
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const generated = await imageRequest(baseUrl, undefined, headers);
+      assert.equal(generated.status, 200);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(observations.map(({ stage }) => stage), [
+        'admission_decision', 'provider_submit', 'provider_outcome', 'client_response',
+      ]);
+      for (const event of observations) {
+        assert.deepEqual(
+          { trace_id: event.trace_id, client_request_id: event.client_request_id, task_id: event.task_id, batch_id: event.batch_id, ordinal: event.ordinal },
+          { trace_id: traceId, client_request_id: traceId, task_id: taskId, batch_id: batchId, ordinal: 2 }
+        );
+        assert(event.duration_ms >= 0 && event.duration_ms <= 600_000);
+      }
+      const mismatched = await imageRequest(baseUrl, { model: imageRoute.id, prompt: 'must not submit' }, {
+        ...headers, 'x-e-mate-batch-ordinal': '3', 'x-e-mate-trace-id': 'wrong-trace',
+      });
+      assert.equal(mismatched.status, 400);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => Response.json({
+      data: [{ b64_json: 'aGVsbG8=' }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    }),
+    undefined, undefined, limits, imageRoute, { isEnabled: async () => true },
+    new InMemoryUsageStore(limits),
+    event => observations.push(event)
+  );
+});
+
+test('observes only executable admission and classifies every provider boundary conservatively', async () => {
+  const runCase = async ({ response, prepare, complete, expected, status }: {
+    response?: () => Response | Promise<Response>;
+    prepare?: UsageStore['prepare'];
+    complete?: UsageStore['complete'];
+    expected: string;
+    status: number;
+  }) => {
+    const observations: ImageObservation[] = [];
+    const store = new InMemoryUsageStore(limits);
+    if (prepare) store.prepare = prepare;
+    if (complete) store.complete = complete;
+    await withGateway(
+      async (baseUrl) => {
+        const result = await imageRequest(baseUrl);
+        assert.equal(result.status, status);
+        await new Promise(resolve => setImmediate(resolve));
+        const admitted = observations.filter(event => event.stage === 'admission_decision' && event.outcome === 'admitted');
+        if (expected === 'preflight' || expected === 'rate_limited') assert.equal(admitted.length, 0);
+        assert.equal(observations.at(-1)?.stage, 'client_response');
+        assert.equal(observations.at(-1)?.failure_code, expected);
+      },
+      response,
+      undefined, undefined, limits, imageRoute, { isEnabled: async () => true }, store,
+      event => observations.push(event)
+    );
+  };
+  await runCase({
+    prepare: async () => { throw new InvocationAdmissionError('TENANT_CONCURRENCY_LIMITED', 1_000); },
+    expected: 'rate_limited', status: 429,
+  });
+  await runCase({
+    prepare: async () => ({ status: 'PENDING', invocationId: 'pending-invocation' }),
+    expected: 'preflight', status: 409,
+  });
+  await runCase({
+    prepare: async () => { throw new InvocationRequestConflictError('conflict'); },
+    expected: 'preflight', status: 409,
+  });
+  await runCase({
+    prepare: async () => ({ status: 'RECORDED', invocationId: 'recorded-invocation' }),
+    expected: 'preflight', status: 503,
+  });
+  await runCase({
+    prepare: async () => { throw new Error('private database detail'); },
+    expected: 'preflight', status: 503,
+  });
+  await runCase({ response: () => new Response('', { status: 400 }), expected: 'provider_rejected', status: 502 });
+  await runCase({ response: () => new Response('', { status: 503 }), expected: 'provider_outcome_unknown', status: 502 });
+  await runCase({ response: () => new Response('not json', { headers: { 'content-type': 'text/plain' } }), expected: 'provider_outcome_unknown', status: 502 });
+  await runCase({ response: async () => { throw new Error('private network detail'); }, expected: 'provider_outcome_unknown', status: 502 });
+  await runCase({
+    response: async () => {
+      const error = new DOMException('private timeout detail', 'TimeoutError') as DOMException & { definitelyNotSubmitted: true };
+      error.definitelyNotSubmitted = true;
+      throw error;
+    },
+    expected: 'provider_timeout_before_accept', status: 504,
+  });
+  await runCase({
+    response: () => Response.json({ data: [{ b64_json: 'aGVsbG8=' }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }),
+    complete: async () => { throw new Error('private usage journal detail'); },
+    expected: 'provider_outcome_unknown', status: 503,
+  });
+});
+
+test('an observation callback exception cannot change an image success response', async () => {
+  await withGateway(
+    async (baseUrl) => {
+      const response = await imageRequest(baseUrl);
+      assert.equal(response.status, 200);
+      assert.equal(((await response.json()) as { data: unknown[] }).data.length, 1);
+      await new Promise(resolve => setImmediate(resolve));
+    },
+    () => Response.json({
+      data: [{ b64_json: 'aGVsbG8=' }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    }),
+    undefined, undefined, limits, imageRoute, { isEnabled: async () => true },
+    new InMemoryUsageStore(limits),
+    () => { throw new Error('private logger detail'); }
+  );
+});
+
 test('exposes image generation only to the desktop catalog while proxying its dedicated API', async () => {
   const usageStore = new InMemoryUsageStore(limits);
   const finalize = usageStore.finalize.bind(usageStore);
@@ -1757,23 +1965,30 @@ test('proxies Codex-like image edits through the same fixed Pro route and usage 
   );
 });
 
-test('surfaces a definite image provider rejection without a second upstream call', async () => {
+test('admits only one simultaneous image POST for the same task and canonical request', async () => {
+  let release!: () => void;
+  let markPosted!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const posted = new Promise<void>((resolve) => { markPosted = resolve; });
   await withGateway(
     async (baseUrl, upstreamRequests) => {
-      const generated = await imageRequest(baseUrl);
-      assert.equal(generated.status, 502);
-      assert.deepEqual(await generated.json(), {
-        error: {
-          code: 'UPSTREAM_REJECTED',
-          message: 'Image provider rejected the request',
-        },
-      });
+      const first = imageRequest(baseUrl);
+      await posted;
+      const duplicate = await imageRequest(baseUrl);
+      assert.equal(duplicate.status, 409);
+      assert.match(JSON.stringify(await duplicate.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
       assert.equal(upstreamRequests.length, 1);
-      const upstreamRequest = upstreamRequests[0];
-      assert.ok(upstreamRequest);
-      assert.equal(((await upstreamRequest.json()) as Record<string, unknown>).model, 'gpt-image-2-pro');
+      release();
+      assert.equal((await first).status, 200);
     },
-    () => new Response('provider rejected', { status: 404 }),
+    async () => {
+      markPosted();
+      await held;
+      return Response.json({
+        data: [{ b64_json: 'aGVsbG8=' }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      });
+    },
     undefined,
     undefined,
     limits,
@@ -1782,23 +1997,115 @@ test('surfaces a definite image provider rejection without a second upstream cal
   );
 });
 
-test('does not risk duplicate image generation after an uncertain provider failure', async () => {
-  const usageStore = new InMemoryUsageStore(limits);
-  const finalize = usageStore.finalize.bind(usageStore);
-  let finalizeCalls = 0;
-  usageStore.finalize = async (principal, taskId) => {
-    finalizeCalls += 1;
-    return finalize(principal, taskId);
-  };
+test('conflicts the same image task identity with a different canonical request', async () => {
   await withGateway(
     async (baseUrl, upstreamRequests) => {
-      const generated = await imageRequest(baseUrl);
-      assert.equal(generated.status, 502);
-      const retry = await imageRequest(baseUrl);
-      assert.equal(retry.status, 409);
-      assert.match(JSON.stringify(await retry.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal((await imageRequest(baseUrl)).status, 502);
+      const conflict = await imageRequest(baseUrl, {
+        model: imageRoute.id,
+        prompt: 'A red square on white.',
+        size: '1024x1024',
+      });
+      assert.equal(conflict.status, 409);
+      assert.match(JSON.stringify(await conflict.json()), /INVOCATION_REQUEST_CONFLICT/);
       assert.equal(upstreamRequests.length, 1);
-      assert.equal(finalizeCalls, 0);
+    },
+    () => new Response('provider unavailable', { status: 503 }),
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('reuses one durable image invocation key after definite rejection while keeping n=1', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const rejected = await imageRequest(baseUrl);
+      assert.equal(rejected.status, 502);
+      assert.deepEqual(await rejected.json(), {
+        error: {
+          code: 'UPSTREAM_REJECTED',
+          message: 'Image provider rejected the request',
+        },
+      });
+      assert.equal((await fetch(`${baseUrl}/v1/usage/task-1`, { headers: auth() })).status, 404);
+      assert.equal(
+        ((await (await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })).json()) as { totalTokens: number }).totalTokens,
+        0
+      );
+      assert.equal((await imageRequest(baseUrl)).status, 200);
+      assert.equal(upstreamRequests.length, 2);
+      assert.equal(
+        upstreamRequests[1]?.headers.get('idempotency-key'),
+        upstreamRequests[0]?.headers.get('idempotency-key')
+      );
+      for (const upstream of upstreamRequests) {
+        const body = (await upstream.json()) as Record<string, unknown>;
+        assert.equal(body.model, 'gpt-image-2-pro');
+        assert.equal(body.n, 1);
+      }
+    },
+    (_request, index) => index === 1
+      ? new Response('provider rejected', { status: 404 })
+      : Response.json({
+          data: [{ b64_json: 'aGVsbG8=' }],
+          usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+        }),
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('keeps ambiguous image network, timeout, 5xx, and invalid-success results PREPARED without a second POST', async () => {
+  const failures: Array<{
+    respond: (request: Request) => Response | Promise<Response>;
+    timeoutMs?: number;
+  }> = [
+    { respond: async () => { throw new TypeError('network failed'); } },
+    {
+      respond: (request) => new Promise<Response>((_resolve, reject) => {
+        request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true });
+      }),
+      timeoutMs: 1_000,
+    },
+    { respond: () => new Response('provider unavailable', { status: 503 }) },
+    { respond: () => Response.json({ data: [], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }) },
+  ];
+  for (const failure of failures) {
+    await withGateway(
+      async (baseUrl, upstreamRequests) => {
+        assert.ok([502, 503, 504].includes((await imageRequest(baseUrl)).status));
+        assert.equal(
+          ((await (await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })).json()) as { totalTokens: number }).totalTokens,
+          0
+        );
+        assert.equal((await fetch(`${baseUrl}/v1/usage/task-1`, { headers: auth() })).status, 503);
+        const retry = await imageRequest(baseUrl);
+        assert.equal(retry.status, 409);
+        assert.match(JSON.stringify(await retry.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+        assert.equal(upstreamRequests.length, 1);
+      },
+      failure.respond,
+      undefined,
+      failure.timeoutMs,
+      limits,
+      imageRoute,
+      { isEnabled: async () => true }
+    );
+  }
+});
+
+test('preserves an ambiguous image invocation across gateway restart without another POST', async () => {
+  const usageStore = new InMemoryUsageStore(limits);
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await imageRequest(baseUrl)).status, 502);
+      assert.equal(upstreamRequests.length, 1);
     },
     () => new Response('provider unavailable', { status: 503 }),
     undefined,
@@ -1808,28 +2115,11 @@ test('does not risk duplicate image generation after an uncertain provider failu
     { isEnabled: async () => true },
     usageStore
   );
-});
-
-test('keeps image and response APIs isolated and rejects extra image controls before upstream', async () => {
   await withGateway(
     async (baseUrl, upstreamRequests) => {
-      assert.equal((await modelRequest(baseUrl)).status, 403);
-      assert.equal(
-        (
-          await imageRequest(baseUrl, {
-            model: imageRoute.id,
-            prompt: 'A blue circle.',
-            n: 2,
-          })
-        ).status,
-        400
-      );
-      const edit = new FormData();
-      edit.set('model', imageRoute.id);
-      edit.set('prompt', 'Do not accept caller controls.');
-      edit.set('quality', 'high');
-      edit.set('image', new Blob([new Uint8Array([1])], { type: 'image/png' }), 'input.png');
-      assert.equal((await imageEditRequest(baseUrl, edit, 'edit-invalid')).status, 400);
+      const retry = await imageRequest(baseUrl);
+      assert.equal(retry.status, 409);
+      assert.match(JSON.stringify(await retry.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
       assert.equal(upstreamRequests.length, 0);
     },
     undefined,
@@ -1837,7 +2127,193 @@ test('keeps image and response APIs isolated and rejects extra image controls be
     undefined,
     limits,
     imageRoute,
-    { isEnabled: async () => true }
+    { isEnabled: async () => true },
+    usageStore
+  );
+});
+
+test('isolates batch children as one n=1 charge each without a parent request or charge', async () => {
+  const usageStore = new InMemoryUsageStore(limits);
+  const batchId = `sha256:${'b'.repeat(64)}`;
+  const childIds = ['a', 'c'].map((value) => `sha256:${value.repeat(64)}`);
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      for (const [index, taskId] of childIds.entries()) {
+        const traceId = `image-${taskId.slice('sha256:'.length)}`;
+        const headers = {
+          ...responseHeaders(),
+          session_id: traceId,
+          'x-client-request-id': traceId,
+          'x-e-mate-task-id': taskId,
+          'x-e-mate-trace-id': traceId,
+          'x-e-mate-batch-id': batchId,
+          'x-e-mate-batch-ordinal': String(index + 1),
+        };
+        assert.equal((await imageRequest(baseUrl, undefined, headers)).status, 200);
+        assert.equal((await imageRequest(baseUrl, undefined, headers)).status, 409);
+        const firstReceipt = await fetch(`${baseUrl}/v1/usage/${taskId}`, { headers: auth() });
+        const secondReceipt = await fetch(`${baseUrl}/v1/usage/${taskId}`, { headers: auth() });
+        assert.equal(firstReceipt.status, 200);
+        assert.deepEqual(await secondReceipt.json(), await firstReceipt.json());
+      }
+      assert.equal(upstreamRequests.length, 2);
+      assert.notEqual(
+        upstreamRequests[0]?.headers.get('idempotency-key'),
+        upstreamRequests[1]?.headers.get('idempotency-key')
+      );
+      for (const upstream of upstreamRequests) {
+        assert.equal(new URL(upstream.url).pathname, '/v1/images/generations');
+        assert.equal(((await upstream.json()) as Record<string, unknown>).n, 1);
+      }
+      assert.equal((await fetch(`${baseUrl}/v1/usage/${batchId}`, { headers: auth() })).status, 404);
+      assert.equal(
+        ((await (await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })).json()) as { totalTokens: number }).totalTokens,
+        4
+      );
+    },
+    () => Response.json({
+      data: [{ b64_json: 'aGVsbG8=' }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    }),
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true },
+    usageStore
+  );
+});
+
+test('local three-request bound leaves the configured fourth slot without gateway queue metadata', async () => {
+  const admissionLimits = {
+    tenantRequestsPerMinute: 100,
+    tenantBurst: 100,
+    tenantMaxConcurrent: 4,
+    invocationLeaseMs: 180_000,
+  };
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((complete) => { resolve = complete; });
+    return { promise, resolve };
+  };
+  const held = Array.from({ length: 5 }, deferred);
+  const posted = Array.from({ length: 5 }, deferred);
+  const pending: Promise<Response>[] = [];
+
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const send = (taskId: string) => {
+        const request = imageRequest(baseUrl, undefined, {
+          ...responseHeaders(),
+          'x-e-mate-task-id': taskId,
+          'x-e-mate-trace-id': `trace-${taskId}`,
+        });
+        pending.push(request);
+        return request;
+      };
+
+      try {
+        const batch = [1, 2, 3].map((ordinal) => send(`batch-task-${ordinal}`));
+        await Promise.all(posted.slice(0, 3).map(({ promise }) => promise));
+
+        const independent = send('independent-task');
+        await posted[3]!.promise;
+        assert.equal(upstreamRequests.length, 4);
+
+        const limited = await send('overflow-task');
+        assert.equal(limited.status, 429);
+        assert.deepEqual(await limited.json(), {
+          error: {
+            code: 'TENANT_CONCURRENCY_LIMITED',
+            message: 'Too many model requests are already running',
+            retryAfterMs: 180_000,
+          },
+        });
+        assert.equal(limited.headers.get('retry-after'), '180');
+        assert.equal(upstreamRequests.length, 4);
+
+        held[0]!.resolve();
+        assert.equal((await batch[0]).status, 200);
+
+        const next = send('next-distinct-task');
+        await posted[4]!.promise;
+        held[4]!.resolve();
+        assert.equal((await next).status, 200);
+        assert.equal(upstreamRequests.length, 5);
+        assert.equal(new Set(upstreamRequests.map((request) => request.headers.get('idempotency-key'))).size, 5);
+        for (const upstream of upstreamRequests) {
+          assert.deepEqual(await upstream.json(), {
+            model: imageRoute.upstreamModelId,
+            prompt: 'A blue circle on white.',
+            size: '1024x1024',
+            n: 1,
+            response_format: 'b64_json',
+          });
+        }
+
+        held[1]!.resolve();
+        held[2]!.resolve();
+        held[3]!.resolve();
+        const completed = await Promise.all([batch[1]!, batch[2]!, independent]);
+        assert.deepEqual(completed.map(({ status }) => status), [200, 200, 200]);
+      } finally {
+        held.forEach(({ resolve }) => resolve());
+        await Promise.allSettled(pending);
+      }
+    },
+    async (_request, index) => {
+      posted[index - 1]!.resolve();
+      await held[index - 1]!.promise;
+      return Response.json({
+        data: [{ b64_json: 'aGVsbG8=' }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      });
+    },
+    undefined,
+    undefined,
+    admissionLimits,
+    imageRoute,
+    { isEnabled: async () => true },
+    new InMemoryUsageStore(admissionLimits, () => 1_000)
+  );
+});
+
+test('keeps image and response APIs isolated and rejects extra image controls before upstream', async () => {
+  const usageStore = new InMemoryUsageStore(limits);
+  const prepare = usageStore.prepare.bind(usageStore);
+  let prepareCalls = 0;
+  usageStore.prepare = async (fact) => {
+    prepareCalls += 1;
+    return prepare(fact);
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 403);
+      const generation = await imageRequest(baseUrl, {
+        model: imageRoute.id,
+        prompt: 'A blue circle.',
+        n: 2,
+      });
+      assert.equal(generation.status, 400);
+      assert.equal(((await generation.json()) as { error: { code: string } }).error.code, 'INVALID_MODEL_REQUEST');
+      const edit = new FormData();
+      edit.set('model', imageRoute.id);
+      edit.set('prompt', 'Do not accept caller controls.');
+      edit.set('quality', 'high');
+      edit.set('image', new Blob([new Uint8Array([1])], { type: 'image/png' }), 'input.png');
+      const editResponse = await imageEditRequest(baseUrl, edit, 'edit-invalid');
+      assert.equal(editResponse.status, 400);
+      assert.equal(((await editResponse.json()) as { error: { code: string } }).error.code, 'INVALID_MODEL_REQUEST');
+      assert.equal(prepareCalls, 0);
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true },
+    usageStore
   );
 });
 
@@ -2662,7 +3138,6 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     for (const clientVersion of [
       '',
       '2.0.11',
-      '2.0.17',
       '99.0.0',
       '2.1.0-rc.1',
       '2.0.15_rc1',
@@ -2696,8 +3171,6 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         id: luna.id,
         apiMode: 'responses',
         upstreamModelId: luna.upstreamModelId,
-        upstreamBaseUrl: luna.upstreamBaseUrl,
-        upstreamApiKey: tenantKey,
         label: luna.label,
         input: luna.input,
         reasoning: true,
@@ -2713,7 +3186,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         upstreamApiKey: searchKey,
       },
     });
-    for (const clientVersion of ['2.0.13', '2.0.14', '2.0.15', '2.0.16']) {
+    for (const clientVersion of ['2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17']) {
       const currentClientResponse = await fetch(
         `${baseUrl}/v1/runtime-models?client_version=${clientVersion}`,
         { headers: auth() },
@@ -2721,9 +3194,11 @@ test('delivers only the authenticated tenant runtime model routes without exposi
       assert.equal(currentClientResponse.status, 200);
       assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
     }
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 5);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 5);
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 6);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 6);
+    assert.equal(keyCalls.includes(luna.id), false);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
+    assert.doesNotMatch(JSON.stringify(releasedClientBody.models), /provider-key|provider\.example/u);
     const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
       models: Array<{ id: string }>;
     };
@@ -2947,7 +3422,10 @@ test('keeps invocation state idempotent and blocks direct usage around unknown w
   const { requestDigest, ...usageFact } = usage;
   const prepared = await store.prepare(invocation);
   assert.equal(prepared.status, 'STARTED');
-  assert.equal((await store.prepare({ ...invocation, requestDigest: 'B'.repeat(43) })).status, 'PENDING');
+  await assert.rejects(
+    store.prepare({ ...invocation, requestDigest: 'B'.repeat(43) }),
+    /request digest changed/
+  );
   assert.equal(
     await store.claimReconciliation(
       principal('tenant-b', 'user-b'),
@@ -3140,5 +3618,81 @@ test('rejects aggregates that cannot be represented by the signed receipt', asyn
       costUsd: 1_000_001,
     }),
     /Invalid usage fact/
+  );
+});
+
+test('proves one image usage fact across conflicting concurrency, receipt reacquire, and admission', async () => {
+  const exactLimits = {
+    tenantRequestsPerMinute: 1,
+    tenantBurst: 1,
+    tenantMaxConcurrent: 1,
+    invocationLeaseMs: 180_000,
+  };
+  const usageStore = new InMemoryUsageStore(exactLimits);
+  const observations: ImageObservation[] = [];
+  let release!: () => void;
+  let submitted!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const posted = new Promise<void>((resolve) => { submitted = resolve; });
+
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const first = imageRequest(baseUrl);
+      await posted;
+      const conflict = await imageRequest(baseUrl, {
+        model: imageRoute.id,
+        prompt: 'A conflicting red square.',
+        size: '1024x1024',
+      });
+      assert.equal(conflict.status, 409);
+      assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, 'INVOCATION_REQUEST_CONFLICT');
+      assert.equal(upstreamRequests.length, 1);
+
+      release();
+      assert.equal((await first).status, 200);
+      const recorded = await imageRequest(baseUrl);
+      assert.equal(recorded.status, 409);
+      assert.equal(((await recorded.json()) as { error: { code: string } }).error.code, 'INVOCATION_RESULT_ALREADY_RECORDED');
+      assert.equal(upstreamRequests.length, 1);
+
+      const firstReceipt = await fetch(`${baseUrl}/v1/usage/task-1`, { headers: auth() });
+      const secondReceipt = await fetch(`${baseUrl}/v1/usage/task-1`, { headers: auth() });
+      assert.equal(firstReceipt.status, 200);
+      assert.equal(secondReceipt.status, 200);
+      assert.deepEqual(await secondReceipt.json(), await firstReceipt.json());
+
+      const rejectedTaskHeaders = {
+        ...responseHeaders(),
+        session_id: 'image-rate-request',
+        'x-client-request-id': 'image-rate-request',
+        'x-e-mate-task-id': 'image-rate-task',
+        'x-e-mate-trace-id': 'image-rate-trace',
+      };
+      const admission = await imageRequest(baseUrl, undefined, rejectedTaskHeaders);
+      assert.equal(admission.status, 429);
+      assert.equal(((await admission.json()) as { error: { code: string } }).error.code, 'TENANT_REQUEST_RATE_LIMITED');
+      assert.equal((await fetch(`${baseUrl}/v1/usage/image-rate-task`, { headers: auth() })).status, 404);
+      assert.equal(upstreamRequests.length, 1);
+
+      await new Promise((resolve) => setImmediate(resolve));
+      const audit = JSON.stringify(observations);
+      assert.match(audit, /task-1/);
+      assert.doesNotMatch(audit, /A blue circle|A conflicting red square|aGVsbG8|provider-secret/i);
+    },
+    async () => {
+      submitted();
+      await held;
+      return Response.json({
+        data: [{ b64_json: 'aGVsbG8=' }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      });
+    },
+    undefined,
+    undefined,
+    exactLimits,
+    imageRoute,
+    { isEnabled: async () => true },
+    usageStore,
+    (event) => observations.push(event)
   );
 });

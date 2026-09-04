@@ -2,6 +2,20 @@ export const CHANNEL = '/emate.fileImport'
 export const MAX_FILES = 8
 export const MAX_FILE_BYTES = 16 * 1024 * 1024
 export const MAX_TOTAL_BYTES = 32 * 1024 * 1024
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+export const MAX_IMAGES = 20
+export const MAX_IMAGE_TOTAL_BYTES = 100 * 1024 * 1024
+export const MAX_IMAGE_PIXELS = 40_000_000
+export const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+
+export interface ImageAttachmentRef {
+  readonly attachmentId: string
+  readonly mediaType: typeof IMAGE_MEDIA_TYPES[number]
+  readonly bytes: number
+  readonly width: number
+  readonly height: number
+  readonly name?: string
+}
 export const COMPOSER_DROP_TARGET = '[data-composer-card]'
 export const WORKSPACE_DROP_TARGET = '[data-dsh-workspace-drop-target]'
 
@@ -65,6 +79,18 @@ export function extensionOf(name: string): string {
 
 export function allowedMediaType(name: string): string | undefined {
   return ALLOWED_MEDIA_BY_EXTENSION[extensionOf(name)]
+}
+
+/** Normalize and validate one cross-platform-safe filename. */
+export function normalizedSafeFileName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const name = value.normalize('NFC')
+  if (name === '' || name === '.' || name === '..' || name !== name.trim()
+    || name.startsWith('.') || new TextEncoder().encode(name).byteLength > 160
+    || /[<>:"/\\|?*\u0000-\u001f]/u.test(name) || /[. ]$/u.test(name)) return undefined
+  const dot = name.indexOf('.')
+  const device = name.slice(0, dot < 0 ? undefined : dot).toUpperCase()
+  return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/u.test(device) ? undefined : name
 }
 
 export function appendImportedMentions(draft: string, files: readonly ImportedFile[]): string {

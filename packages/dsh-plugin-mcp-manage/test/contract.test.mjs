@@ -12,7 +12,7 @@ const statusSource = readFileSync(new URL('../src/status.ts', import.meta.url), 
 const runtime = readFileSync(new URL('../lib/index.mjs', import.meta.url), 'utf8')
 
 test('MCP management keeps native DSH ownership and secrets out of settings', () => {
-  assert.equal(manifest.version, '2.0.16')
+  assert.equal(manifest.version, '2.0.17')
   assert.equal(manifest.eMate.runtime, '@deepseek-ai/dsh-mcp-client')
   assert.equal(manifest.eMate.mcpSdkVersion, '1.29.0')
   assert.match(source, /ctx\.loader\.(?:create|update)/u)
@@ -36,7 +36,7 @@ test('MCP management keeps native DSH ownership and secrets out of settings', ()
   assert.match(source, /MCP_CATALOG\.get\(args\.name\)/u)
   assert.match(source, /current\(\)\.servers\.filter\(supportedServer\)/u)
   assert.match(source, /if \(!supportedServer\(existing\)\) throw new Error\(UNSUPPORTED_MCP\)/u)
-  assert.match(source, /该 MCP 不在 2\.0\.16 受审计 HTTPS catalog 中/u)
+  assert.match(source, /该 MCP 不在 2\.0\.17 受审计 HTTPS catalog 中/u)
   assert.doesNotMatch(source, /transport: 'stdio', serverName/u)
   assert.doesNotMatch(source, /transport: \{ type: 'string'/u)
   assert.doesNotMatch(source, /command: \{ type: 'string'/u)

@@ -70,20 +70,22 @@ type LoadedProductionConfiguration = {
 export function createProductionAuthenticator(
   authenticateSession: ReturnType<typeof createSessionTokenVerifier>,
   policy: Awaited<ReturnType<typeof openPostgresTenantModelRoutePolicy>>['policy'],
+  usageStore: Awaited<ReturnType<typeof openPostgresUsageStore>>['store'],
   routeIds: readonly string[]
 ): ReturnType<typeof createSessionTokenVerifier> {
   const callableRouteIds = routeIds.filter((routeId) => routeId !== 'deepseek-web-search');
   return async (token) => {
     const sessionPrincipal = await authenticateSession(token);
     if (sessionPrincipal) {
-      return sessionPrincipal.sessionId &&
-        (await policy.isUserSessionActive(
-          sessionPrincipal.tenantId,
-          sessionPrincipal.userId,
-          sessionPrincipal.sessionId
-        ))
-        ? sessionPrincipal
-        : null;
+      if (!sessionPrincipal.sessionId || !(await policy.isUserSessionActive(
+        sessionPrincipal.tenantId,
+        sessionPrincipal.userId,
+        sessionPrincipal.sessionId
+      ))) return null;
+      const tokenScopedRouteIds = callableRouteIds.filter((routeId) => sessionPrincipal.modelIds.includes(routeId));
+      if (tokenScopedRouteIds.length === 0) return null;
+      const modelIds = await usageStore.activeModelIds(sessionPrincipal, tokenScopedRouteIds);
+      return modelIds.length > 0 ? { ...sessionPrincipal, modelIds } : null;
     }
     return policy.authenticateClientCredential(token, callableRouteIds);
   };
@@ -797,13 +799,16 @@ export async function startProductionModelGateway(configurationFile: string): Pr
     const routeIds = configuration.routes.map(({ id }) => id);
     const handler = createModelGatewayHandler({
       routes: configuration.routes,
-      authenticate: createProductionAuthenticator(configuration.authenticate, modelRoutePolicy.policy, routeIds),
+      authenticate: createProductionAuthenticator(configuration.authenticate, modelRoutePolicy.policy, database.store, routeIds),
       tenantModelRoutePolicy: modelRoutePolicy.policy,
       usageStore: database.store,
       usageKeyId: configuration.usageKeyId,
       usagePrivateKey: configuration.usagePrivateKey,
       consentStore: consent.store,
       upstreamTimeoutMs: configuration.upstreamTimeoutMs,
+      imageObservation: (event) => {
+        process.stdout.write(`${JSON.stringify({ event: 'image_observation', ...event })}\n`);
+      },
     });
     server = createServer(
       {

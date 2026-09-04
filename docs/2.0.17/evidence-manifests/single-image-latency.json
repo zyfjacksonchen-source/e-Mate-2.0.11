@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "ticket": "EM217-108",
+  "status": "OPEN",
+  "contract": "docs/2.0.17/contracts/single-image-latency.md",
+  "claim": "pinned-owner-lower-bound-not-native-imagegen-parity",
+  "protocol": {
+    "fake_delay_ms": 25,
+    "fresh_processes": 3,
+    "percentile": "nearest-rank-per-repetition",
+    "all_repetitions_must_pass": true
+  },
+  "provenance": null,
+  "results": null,
+  "external_raw": {
+    "uri": null,
+    "sha256": null
+  },
+  "gui_first_visible": {
+    "status": "OPEN",
+    "p95_limit_ms": 500,
+    "p95_ms": null,
+    "evidence_uri": null,
+    "sha256": null
+  }
+}

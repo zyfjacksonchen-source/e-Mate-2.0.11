@@ -15,6 +15,8 @@ function applyHomeStyles(): void {
   const style = document.createElement('style')
   style.dataset.emateHomeTest = ''
   style.textContent = readFileSync('src/client/home.module.css', 'utf8').replaceAll(':global(', ':is(')
+    // jsdom does not resolve custom properties inside border shorthands.
+    .replaceAll('var(--emate-color-rule)', '#777')
   document.head.append(style)
 }
 
@@ -33,7 +35,7 @@ afterEach(() => {
   delete document.body.dataset.dshDesktopPlatform
 })
 
-describe('e-Mate 2.0.16 composer projection', () => {
+describe('e-Mate 2.0.17 composer projection', () => {
   it('routes external connections into the existing collaboration capability surface', () => {
     const openConnections = vi.fn()
     render(<ComposerConnectors LinkIcon={Icon} openConnections={openConnections} />)
@@ -123,10 +125,23 @@ describe('e-Mate 2.0.16 composer projection', () => {
       <textarea defaultValue="" />
       <FileImportControl
         sessionId="session-1"
-        input={{ draft: '', phase: 'plain' }}
-        inputActions={{ setDraft() {} }}
+        input={{
+          draft: '', phase: 'plain', fileRefs: [], imageIds: [], imageRefs: [], hydratedImageKeys: [],
+          runtimeOnlyImageIds: [], imageStagePending: false,
+        }}
+        inputActions={{
+          addFiles: () => true, removeFile() {}, beginImageStage: () => true, cancelImageStage() {},
+          addDurableImages: () => true, hydrateDurableImage: () => true, removeDurableImage: () => undefined,
+        }}
         isLoopback
-        callImport={async () => ({ ok: true })}
+        call={async () => ({ ok: true })}
+        createDraftImages={() => []}
+        draftImages={() => []}
+        releaseDraftImages={() => {}}
+        readAttachment={async () => ({ ok: false, error: { code: 'internal', message: 'unused', details: {} } })}
+        imageLimits={() => undefined}
+        notify={() => {}}
+        renderComposer={({ controls }) => <>{controls}</>}
       />
       <ComposerMentions openMentions={() => {}} />
     </div>)
@@ -146,7 +161,7 @@ describe('e-Mate 2.0.16 composer projection', () => {
     expect([glyphStyle.fontSize, glyphStyle.lineHeight]).toEqual(['16px', '16px'])
   })
 
-  it('keeps a picked @电脑操控 reference visible in the native composer', () => {
+  it('keeps a picked @电脑操控 reference visible in the native composer', async () => {
     document.body.dataset.dshDesktopPlatform = 'darwin'
     let registered: InputTriggerSource | undefined
     registerComputerUseTrigger({
@@ -168,8 +183,34 @@ describe('e-Mate 2.0.16 composer projection', () => {
       insert: { source: '电脑操控', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' },
     })
     const signal = new AbortController().signal
-    expect(registered?.codec?.serialize('computer-use', signal)).resolves.toBe('@电脑操控')
+    await expect(registered?.codec?.serialize('computer-use', signal)).resolves.toBe('@电脑操控')
     expect(readFileSync('src/client/home.module.css', 'utf8')).toContain("font-family: 'DshChipCell', -apple-system")
+  })
+
+  it('keeps one frame and a flush workspace footer when slots add wrappers around the native card', () => {
+    const composer = (depth: number) => {
+      let body = <div data-testid="native-root"><div data-composer-card data-testid="card">
+        <div aria-label="附件">文件缩略卡</div><textarea defaultValue="正文" /><div><button>发送</button></div>
+      </div></div>
+      for (let i = 0; i < depth; i++) body = <div>{body}</div>
+      return <div data-emate-composer-frame-host data-testid="frame">
+        <div data-slot="conversation.composer.bar">{body}</div>
+        <div data-testid="workspace-row"><div data-slot="conversation.hero.workspace"><button>通用会话</button></div></div>
+      </div>
+    }
+    const view = render(composer(0))
+    applyHomeStyles()
+    for (const depth of [0, 3]) {
+      view.rerender(composer(depth))
+      const frame = getComputedStyle(screen.getByTestId('frame'))
+      const nativeRoot = getComputedStyle(screen.getByTestId('native-root'))
+      const card = getComputedStyle(screen.getByTestId('card'))
+      const footer = getComputedStyle(screen.getByTestId('workspace-row'))
+      expect([frame.gap, frame.padding, frame.boxSizing, frame.borderWidth]).toEqual(['0px', '0px', 'border-box', '2px'])
+      expect(nativeRoot.padding).toBe('0px')
+      expect([card.borderWidth, card.borderRadius, card.backgroundColor]).toEqual(['0px', '0px', 'rgba(0, 0, 0, 0)'])
+      expect([footer.marginTop, footer.borderTopWidth, footer.backgroundColor]).toEqual(['0px', '1px', 'rgba(0, 0, 0, 0)'])
+    }
   })
 
   it('uses the target input trigger and input-bar contracts without a parallel transport', async () => {
@@ -195,13 +236,12 @@ describe('e-Mate 2.0.16 composer projection', () => {
     expect(styles).toMatch(/\[data-emate-composer-frame-host\][\s\S]*?\[data-slot='conversation\.composer\.bar'\]/u)
     expect(styles).toMatch(/\[data-emate-composer-frame-host\][\s\S]*?\[data-slot='conversation\.hero\.workspace'\]/u)
     expect(styles).toMatch(/\[data-phase='active'\] \[data-emate-composer-frame-host\][\s\S]*?align-self:\s*center;[\s\S]*?width:\s*min\(var\(--dsh-composer-card-max-width\), 100%\)/u)
-    expect(styles).toMatch(/\[data-emate-composer-frame-host\] > \[data-slot='conversation\.composer\.bar'\] > div\)[^{]*\{[^}]*padding:\s*0 !important/u)
+    expect(styles).toMatch(/\[data-emate-composer-frame-host\] :has\(> \[data-composer-card\]\)\)[^{]*\{[^}]*padding:\s*0 !important/u)
     expect(styles).not.toContain('2 * var(--dsh-composer-side-clearance)')
     expect(styles).toMatch(/\[data-phase='hero'\] \[data-composer-seat\][\s\S]*?padding-bottom:\s*32px/u)
-    expect(styles).toMatch(/\[data-phase='hero'\] \[data-emate-composer-frame-host\][\s\S]*?padding-bottom:\s*0/u)
     expect(styles).toMatch(/\[data-emate-composer-frame-host\][^{]*\{[^}]*--emate-composer-frame-radius:\s*24px;[^}]*position:\s*relative;[^}]*border-radius:\s*var\(--emate-composer-frame-radius\)/u)
-    expect(styles).toMatch(/\[data-emate-composer-frame-host\][\s\S]*?\[data-composer-card\][\s\S]*?border-radius:\s*var\(--emate-composer-frame-radius\) !important/u)
-    expect(styles).toMatch(/\[data-emate-composer-frame-host\]:has\(\[data-slot='conversation\.hero\.workspace'\]\)[\s\S]*?border-radius:\s*var\(--emate-composer-frame-radius\) var\(--emate-composer-frame-radius\) 0 0 !important/u)
+    expect(styles).not.toContain("[data-slot='conversation.composer.bar'] > div")
+    expect(styles).not.toContain('margin-top: -12px')
     expect(styles).not.toContain('--emate-composer-frame-bottom')
   })
 })

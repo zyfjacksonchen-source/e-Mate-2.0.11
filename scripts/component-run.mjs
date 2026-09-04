@@ -51,7 +51,7 @@ function run(args, env = process.env) {
 
 for (const component of components) {
   const manifest = JSON.parse(readFileSync(resolve(component.root, 'package.json'), 'utf8'))
-  if (manifest.name !== component.id || manifest.version !== '2.0.16'
+  if (manifest.name !== component.id || manifest.version !== '2.0.17'
     || manifest.eMate?.harnessVersion !== '0.1.0-rc.7'
     || !Array.isArray(manifest.eMate?.baseImports)) {
     throw new Error(`bundled Profile package identity is invalid: ${component.id}`)

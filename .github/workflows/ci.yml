@@ -39,7 +39,7 @@ jobs:
       - working-directory: desktop
         run: yarn install --immutable
       - working-directory: desktop
-        run: yarn check
+        run: yarn workspace @e-mate/desktop check:source
 
   desktop-windows:
     runs-on: windows-latest

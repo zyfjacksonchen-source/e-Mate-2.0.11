@@ -9,9 +9,10 @@ import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
+import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { HARNESS_COMMIT, HARNESS_VERSION, verifyHarnessBuildReceipt } from './harness-provenance.mjs'
 
-const PRODUCT_VERSION = '2.0.16'
+const PRODUCT_VERSION = '2.0.17'
 const PNPM_VERSION = '11.7.0'
 
 const root = resolve(import.meta.dirname, '..')
@@ -156,6 +157,8 @@ async function main() {
     })
     await arrangeRuntime(stage, assembled)
     await applyHarnessRuntimeAdapters(assembled)
+    const conversationAdapter = join(root, CONVERSATION_ADAPTER_PATH)
+    await writeFile(join(assembled, 'e-mate-conversation-adapter.mjs'), readFileSync(conversationAdapter))
     const reported = capture(process.execPath, [join(assembled, 'apps', 'cli', 'lib', 'bin.js'), '--version'])
     if (reported !== HARNESS_VERSION) throw new Error(`assembled Harness reported ${reported}`)
     await publishAtomically(assembled, {
@@ -167,6 +170,8 @@ async function main() {
       commit: HARNESS_COMMIT,
       lockfile_sha256: sha256(join(harnessRoot, 'pnpm-lock.yaml')),
       adapters_sha256: sha256(adaptersPath),
+      conversation_adapter_sha256: sha256(conversationAdapter),
+      conversation_client_sha256: sha256(join(assembled, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')),
       package_manager: `pnpm@${PNPM_VERSION}`,
       assembly: 'harness-pnpm-deploy-and-release-pack',
     })

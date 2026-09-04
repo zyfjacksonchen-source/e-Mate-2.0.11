@@ -38,7 +38,7 @@ afterEach(() => {
   history.replaceState(null, '', '/')
 })
 
-describe('e-Mate 2.0.16 identity and settings fidelity', () => {
+describe('e-Mate 2.0.17 identity and settings fidelity', () => {
   it('keeps the AURA login contract and current SettingsDialog copy', () => {
     const identity = readFileSync(join(process.cwd(), 'src/client/identity.module.css'), 'utf8')
     const identityView = readFileSync(join(process.cwd(), 'src/client/identity.tsx'), 'utf8')
@@ -72,7 +72,8 @@ describe('e-Mate 2.0.16 identity and settings fidelity', () => {
     expect(screen.getByText('管理个人资料、常规设置、知识和记忆。')).toBeTruthy()
   })
 
-  it('renders the branded AURA login copy without changing the login RPC seam', async () => {
+  it('renders the branded AURA login copy on the explicit login route without changing the RPC seam', async () => {
+    history.replaceState(null, '', '/login')
     const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => endpoint === 'identity.bootstrap'
       ? {
           ok: true,
@@ -191,6 +192,7 @@ describe('e-Mate 2.0.16 identity and settings fidelity', () => {
   })
 
   it('keeps registration, verification and pending approval on the target RPC seam', async () => {
+    history.replaceState(null, '', '/login')
     const shellRoot = document.createElement('div')
     shellRoot.id = 'root'
     shellRoot.style.width = '432px'
@@ -260,7 +262,7 @@ describe('e-Mate 2.0.16 identity and settings fidelity', () => {
     shellRoot.remove()
   })
 
-  it('replays a protected chat deep link after the async identity gate unlocks', async () => {
+  it('keeps a local chat deep link available while enterprise identity refresh is pending', async () => {
     history.replaceState(null, '', '/chat/performance-session')
     let unlock!: (result: RpcResult) => void
     const callIdentity = vi.fn(() => new Promise<RpcResult>(resolve => { unlock = resolve }))
@@ -291,11 +293,11 @@ describe('e-Mate 2.0.16 identity and settings fidelity', () => {
 
     render(<Runtime />)
 
-    await waitFor(() => { expect(location.pathname).toBe('/login') })
+    expect(location.pathname).toBe('/chat/performance-session')
     act(() => { markSessionsReady() })
-    expect(openSession).not.toHaveBeenCalled()
-    unlock({ ok: true, value: signedIn })
     await waitFor(() => { expect(openSession).toHaveBeenCalledWith('performance-session') })
+    unlock({ ok: true, value: signedIn })
+    await act(async () => { await Promise.resolve() })
     expect(location.pathname).toBe('/chat/performance-session')
   })
 
@@ -508,7 +510,8 @@ describe('e-Mate 2.0.16 identity and settings fidelity', () => {
     fireEvent.click(await screen.findByRole('button', { name: '退出登录' }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '退出登录' }))
 
-    expect(await screen.findByRole('heading', { name: '欢迎回来' })).toBeTruthy()
+    await waitFor(() => { expect(screen.getByLabelText('用户中心，未登录')).toBeTruthy() })
+    expect(screen.queryByRole('heading', { name: '欢迎回来' })).toBeNull()
     expect(screen.getByRole('alert').textContent).toBe('本机已退出；企业会话撤销状态未知，请稍后重新登录确认。')
     expect(document.body.textContent).not.toContain('500')
     expect(callIdentity.mock.calls.filter(([endpoint]) => endpoint === 'session.logout')).toHaveLength(1)

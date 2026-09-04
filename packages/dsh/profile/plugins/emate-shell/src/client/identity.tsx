@@ -96,6 +96,7 @@ export function IdentityGate({ callIdentity }: Props) {
   const [password, setPassword] = useState('')
   const [rememberLogin, setRememberLogin] = useState(false)
   const [authView, setAuthView] = useState<'login' | 'register'>(() => location.pathname === '/register' ? 'register' : 'login')
+  const [routePath, setRoutePath] = useState(() => location.pathname)
   const [account, setAccount] = useState('')
   const [realName, setRealName] = useState('')
   const [registrationPassword, setRegistrationPassword] = useState('')
@@ -105,37 +106,77 @@ export function IdentityGate({ callIdentity }: Props) {
   const [challengeBusy, setChallengeBusy] = useState(false)
   const [registration, setRegistration] = useState<RegistrationReceipt | null>(null)
   const identityLoadRevision = useRef(0)
+  const identityLoad = useRef<Promise<void> | null>(null)
+  const reconnectRefreshQueued = useRef(false)
+  const identityRefreshQueued = useRef<{ notice: string | null } | null>(null)
   const identityGateMounted = useRef(false)
   const [accepted, setAccepted] = useState<ReadonlySet<string>>(() => new Set())
   const [returnPath] = useState(() => ['/login', '/register', '/agreement'].includes(location.pathname)
     ? '/'
     : `${location.pathname}${location.search}${location.hash}`)
 
-  const load = async (notice: string | null = null) => {
+  const load = (notice: string | null = null): Promise<void> => {
+    if (identityLoad.current !== null) return identityLoad.current
     const revision = identityLoadRevision.current + 1
     identityLoadRevision.current = revision
     setError(notice)
-    try {
-      const result = await callIdentity('identity.bootstrap', {})
-      if (!identityGateMounted.current || revision !== identityLoadRevision.current) return
-      if (!result.ok) throw new Error(result.error?.message ?? '企业身份服务拒绝了请求。')
-      if (!validBootstrap(result.value)) throw new Error('企业身份服务返回了无效状态。')
-      setState(result.value)
-    } catch (loadError) {
-      if (!identityGateMounted.current || revision !== identityLoadRevision.current) return
-      setError(errorMessage(loadError))
-    }
+    const pending = (async () => {
+      try {
+        const result = await callIdentity('identity.bootstrap', {})
+        if (!identityGateMounted.current || revision !== identityLoadRevision.current) return
+        if (!result.ok) throw new Error(result.error?.message ?? '企业身份服务拒绝了请求。')
+        if (!validBootstrap(result.value)) throw new Error('企业身份服务返回了无效状态。')
+        setState(result.value)
+      } catch (loadError) {
+        if (!identityGateMounted.current || revision !== identityLoadRevision.current) return
+        setError(errorMessage(loadError))
+      }
+    })()
+    identityLoad.current = pending
+    void pending.finally(() => {
+      if (identityLoad.current !== pending) return
+      identityLoad.current = null
+      const identityRefresh = identityRefreshQueued.current
+      const reconnectRefresh = reconnectRefreshQueued.current
+      identityRefreshQueued.current = null
+      reconnectRefreshQueued.current = false
+      if (identityGateMounted.current && (identityRefresh !== null || reconnectRefresh)) {
+        void load(identityRefresh?.notice ?? null)
+      }
+    })
+    return pending
   }
 
   useEffect(() => {
     identityGateMounted.current = true
     return () => {
       identityGateMounted.current = false
+      reconnectRefreshQueued.current = false
+      identityRefreshQueued.current = null
       identityLoadRevision.current += 1
     }
   }, [])
 
   useEffect(() => { void load() }, [])
+
+  useEffect(() => {
+    const reconnect = () => {
+      if (identityLoad.current !== null) {
+        reconnectRefreshQueued.current = true
+        return
+      }
+      void load()
+    }
+    const visible = () => { if (!document.hidden) reconnect() }
+    addEventListener('online', reconnect)
+    addEventListener('focus', reconnect)
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      removeEventListener('online', reconnect)
+      removeEventListener('focus', reconnect)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [])
 
   useEffect(() => {
     const refresh = (event: Event) => {
@@ -144,17 +185,26 @@ export function IdentityGate({ callIdentity }: Props) {
         : event instanceof CustomEvent && event.detail?.remote_revocation === 'unknown'
           ? REMOTE_LOGOUT_UNKNOWN_MESSAGE
           : null
-      void load(notice)
+      const pending = identityLoad.current
+      if (pending === null) {
+        void load(notice)
+        return
+      }
+      identityLoadRevision.current += 1
+      identityRefreshQueued.current = { notice }
     }
     addEventListener(IDENTITY_CHANGED_EVENT, refresh)
     return () => { removeEventListener(IDENTITY_CHANGED_EVENT, refresh) }
   }, [])
 
-  const mode = state?.ready !== true || !state.authenticated
-    ? 'login'
-    : state.workspace_unlocked
-      ? 'unlocked'
-      : 'agreement'
+  const enterpriseRoute = routePath === '/login' || routePath === '/register' || routePath === '/agreement'
+  const mode = state?.authenticated === true && state.workspace_unlocked
+    ? 'unlocked'
+    : state?.authenticated === true && routePath === '/agreement'
+      ? 'agreement'
+      : enterpriseRoute
+        ? 'login'
+        : 'local'
 
   useEffect(() => {
     if (mode === 'unlocked') {
@@ -164,12 +214,20 @@ export function IdentityGate({ callIdentity }: Props) {
       }
       return
     }
-    const path = mode === 'agreement' ? '/agreement' : authView === 'register' ? '/register' : '/login'
-    if (location.pathname !== path) history.replaceState(null, '', path)
-  }, [authView, mode, returnPath])
+    if (mode === 'login') {
+      const path = routePath === '/agreement' && state === null
+        ? '/agreement'
+        : authView === 'register' ? '/register' : '/login'
+      if (routePath !== path) {
+        history.replaceState(null, '', path)
+        setRoutePath(path)
+      }
+    }
+  }, [authView, mode, returnPath, routePath, state])
 
   useEffect(() => {
     const sync = () => {
+      setRoutePath(location.pathname)
       if (mode === 'unlocked') {
         if (['/login', '/register', '/agreement'].includes(location.pathname)) {
           history.replaceState(null, '', returnPath)
@@ -177,20 +235,16 @@ export function IdentityGate({ callIdentity }: Props) {
         }
         return
       }
-      if (mode === 'agreement') {
-        if (location.pathname !== '/agreement') history.replaceState(null, '', '/agreement')
-        return
-      }
+      if (mode === 'agreement' || mode === 'local') return
       const nextView = location.pathname === '/register' ? 'register' : 'login'
       setAuthView(nextView)
-      if (!['/login', '/register'].includes(location.pathname)) history.replaceState(null, '', `/${nextView}`)
     }
     addEventListener('popstate', sync)
     return () => { removeEventListener('popstate', sync) }
   }, [mode, returnPath])
 
   useEffect(() => {
-    if (mode === 'unlocked') return undefined
+    if (mode === 'unlocked' || mode === 'local') return undefined
     const root = document.getElementById('root')
     if (root === null) return undefined
     const gate = document.querySelector('[data-emate-identity-gate]')
@@ -232,7 +286,7 @@ export function IdentityGate({ callIdentity }: Props) {
       setPassword('')
       if (!result.ok) throw new Error(result.error?.message ?? '登录失败。')
       if (!validBootstrap(result.value)) throw new Error('企业身份服务返回了无效登录状态。')
-      history.replaceState(null, '', returnPath)
+      history.replaceState(null, '', result.value.workspace_unlocked ? returnPath : '/agreement')
       location.reload()
     } catch (loginError) {
       setPassword('')
@@ -343,6 +397,12 @@ export function IdentityGate({ callIdentity }: Props) {
   }
 
   if (mode === 'unlocked') return null
+  if (mode === 'local') {
+    return error === null ? null : createPortal(
+      <p role="alert" data-emate-identity-status="local">{error}</p>,
+      document.body,
+    )
+  }
 
   if (mode === 'agreement' && state !== null) {
     return createPortal(

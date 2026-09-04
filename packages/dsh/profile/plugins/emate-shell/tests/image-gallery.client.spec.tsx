@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
+import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseImageOutputReceipt } from '../src/client/image-gallery-contract.ts'
@@ -14,6 +15,7 @@ import {
   imageCallsDefinition,
   namedGalleryImageItems,
   selectArtifactTerminal,
+  schemaAwareChildGalleryImageItems,
   subagentSettledDefinition,
   terminalChildImageItems,
   terminalImageItems,
@@ -99,6 +101,13 @@ const limits = {
   mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
 }
 
+function projectionHook(imageBatches: unknown = undefined): UseProjection {
+  return ((key: string, selector?: (value: unknown) => unknown) => {
+    const value = key === 'imageLimits' ? limits : key === 'eMateImageBatches' ? imageBatches : undefined
+    return selector === undefined ? value : selector(value)
+  }) as UseProjection
+}
+
 function terminalProps(
   nodes: readonly unknown[],
   matched = { callIds: ['call-image-1'], paths: [] as string[], childSessionIds: [] as string[] },
@@ -113,7 +122,7 @@ function terminalProps(
     useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => nodes.values() } } }),
     useSessions: (selector: (value: unknown) => unknown) => selector({ byId: { 'session-1': { cwd: '/work' } } }),
     useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
-    useProjection: () => limits,
+    useProjection: projectionHook(),
     loadImage: vi.fn(async () => 'blob:image'),
     addImageToDraft: vi.fn(async () => {}),
     draftBytes: () => 0,
@@ -146,12 +155,17 @@ function galleryProps(
 ) {
   return {
     sessionId,
-    useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => nodes.values() } } }),
+    useSession: (selector: (value: unknown) => unknown) => selector({
+      chat: {
+        nodes: { values: () => nodes.values() },
+        timeline: { turnOrder: [], turns: new Map() },
+      },
+    }),
     useSessions: (selector: (value: unknown) => unknown) => selector({
       byId: { [sessionId]: {} }, subagentsByParent: {},
     }),
     useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
-    useProjection: () => limits,
+    useProjection: projectionHook(),
     loadImage: vi.fn(async () => 'blob:image'),
     addImageToDraft: vi.fn(async () => {}),
     draftBytes: () => 0,
@@ -165,6 +179,8 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
   const pendingReads: Array<(result: unknown) => void> = []
   const drafts = new Map<string, { id: string; file: File }>()
   let imageIds: readonly string[] = []
+  let draft = ''
+  let phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting' = 'plain'
   let injected: any
   const readAttachment = vi.fn(() => new Promise(resolve => { pendingReads.push(resolve) }))
   const addImages = vi.fn((ids: readonly string[]) => {
@@ -176,7 +192,8 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     for (const image of images) drafts.delete(image.id)
   })
   const shell = {
-    state: { getSnapshot: () => ({ imageIds, phase: 'plain' }) },
+    state: { getSnapshot: () => ({ draft, imageIds, phase }) },
+    setDraft: vi.fn((value: string) => { draft = value }),
     addImages,
     notify: vi.fn(),
   }
@@ -195,6 +212,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     sessions: {
       binding,
       scope: () => ({}),
+      open: vi.fn(),
     },
     conversation: {
       resolveImage: vi.fn(async () => 'blob:image'),
@@ -222,6 +240,11 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     shell,
     notice,
     imageIds: () => imageIds,
+    setImageIds: (value: readonly string[]) => { imageIds = value },
+    draft: () => draft,
+    setDraft: (value: string) => { draft = value },
+    setPhase: (value: typeof phase) => { phase = value },
+    openSession: ctx.sessions.open,
     draftCount: () => drafts.size,
     resolveReads: () => {
       for (const resolveRead of pendingReads.splice(0)) {
@@ -245,6 +268,48 @@ describe('completed artifact terminal', () => {
     })
     expect(entries[0]?.component).toBe(ImageGalleryView)
     await runtime.dispose()
+  })
+
+  it('prepares exact new-image retry text without overwriting or submitting composer input', async () => {
+    const retry = { ordinal: 2, prompt: '保留原始构图并使用蓝色背景', imageIds: [] }
+    const ready = galleryAdmissionHarness(limits)
+    expect(await ready.injected.prepareImageRetry(retry)).toEqual({
+      prepared: true,
+      message: '已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。',
+    })
+    expect(ready.draft()).toBe('请重新生成一张图片，要求如下：\n保留原始构图并使用蓝色背景')
+    expect(ready.draft()).not.toMatch(/batch|task|client_request|sha256:/u)
+    expect(ready.openSession).toHaveBeenCalledWith('session-gallery')
+
+    const occupied = galleryAdmissionHarness(limits)
+    occupied.setDraft('用户现有草稿')
+    expect(await occupied.injected.prepareImageRetry(retry)).toEqual({
+      prepared: false, message: '输入框已有内容或图片，未覆盖现有草稿。',
+    })
+    expect(occupied.draft()).toBe('用户现有草稿')
+    expect(occupied.openSession).not.toHaveBeenCalled()
+
+    const occupiedByImage = galleryAdmissionHarness(limits)
+    occupiedByImage.setImageIds([attachment.attachmentId])
+    expect(await occupiedByImage.injected.prepareImageRetry(retry)).toEqual({
+      prepared: false, message: '输入框已有内容或图片，未覆盖现有草稿。',
+    })
+    expect(occupiedByImage.imageIds()).toEqual([attachment.attachmentId])
+    expect(occupiedByImage.draft()).toBe('')
+
+    const busy = galleryAdmissionHarness(limits)
+    busy.setPhase('claimed')
+    expect(await busy.injected.prepareImageRetry(retry)).toEqual({
+      prepared: false, message: '当前输入正在处理中，请稍后再准备。',
+    })
+    expect(busy.draft()).toBe('')
+
+    const referenced = galleryAdmissionHarness(limits)
+    expect(await referenced.injected.prepareImageRetry({ ...retry, imageIds: [attachment.attachmentId] })).toEqual({
+      prepared: false, message: '带参考图的任务暂不能安全准备重试，请重新附图后发送。',
+    })
+    expect(referenced.draft()).toBe('')
+    expect(referenced.openSession).not.toHaveBeenCalled()
   })
 
   it('uses the native overlay Toast transiently without changing composer layout', () => {
@@ -487,6 +552,67 @@ describe('completed artifact terminal', () => {
       .toHaveLength(4)
   })
 
+  it('keeps empty upgrade projection legacy until exact batch state or a logged call exists', () => {
+    const parentId = 'schema-parent'
+    const row = (child: string, call: string, seq: number, suffix: string) => ({
+      seq, createdAt: seq, receipt: receipt({
+        parent_session_id: child, call_id: call,
+        content: [{ type: 'image', attachment: {
+          ...attachment, attachmentId: 'sha256:' + suffix.repeat(64), name: call + '.png',
+        } }],
+        output: { ...attachment, attachmentId: 'sha256:' + suffix.repeat(64), name: call + '.png' },
+      }),
+    })
+    const exact = row('child-exact', 'call-exact', 7, 'b')
+    const wrongPointer = row('child-exact', 'call-wrong', 9, 'd')
+    const foreign = row('child-foreign', 'call-foreign', 8, 'c')
+    const sessions = {
+      byId: {
+        'child-exact': { projectionValues: { eMateImageReceipts: [exact, wrongPointer] } },
+        'child-foreign': { projectionValues: { eMateImageReceipts: [foreign] } },
+        'child-empty': { projectionValues: {} },
+      },
+      subagentsByParent: { [parentId]: { entries: [
+        { kind: 'child', id: 'child-exact', label: '同名任务', mode: 'one-shot' },
+        { kind: 'child', id: 'child-foreign', label: '同名任务', mode: 'one-shot' },
+        { kind: 'child', id: 'child-empty', label: '同名任务', mode: 'one-shot' },
+      ] } },
+    }
+    const emptyUpgradeProjection = { batches: [], batchesById: {} }
+    expect(schemaAwareChildGalleryImageItems(sessions as never, parentId, emptyUpgradeProjection).map(item => item.callId))
+      .toEqual(['call-exact', 'call-foreign', 'call-wrong'])
+
+    const task = { childSessionId: 'child-exact', receipt: {
+      ownerSessionId: 'child-exact', callId: 'call-exact', revision: 2, eventSeq: 7, status: 'completed',
+    } }
+    const batch = { batches: [{ tasks: [task] }], batchesById: {} }
+    expect(schemaAwareChildGalleryImageItems(sessions as never, parentId, batch as never).map(item => item.callId))
+      .toEqual(['call-exact', 'call-foreign'])
+    expect(schemaAwareChildGalleryImageItems(
+      sessions as never, parentId, emptyUpgradeProjection, true,
+    )).toEqual([])
+    expect(schemaAwareChildGalleryImageItems(
+      sessions as never, parentId, { batches: [], batchesById: {} }, true,
+    )).toEqual([])
+
+    const props = (batchCalls: readonly unknown[]) => galleryProps(parentId, [], {
+      useSession: (selector: (value: unknown) => unknown) => selector({
+        chat: {
+          nodes: { values: () => [][Symbol.iterator]() },
+          timeline: {
+            turnOrder: [1], turns: new Map([[1, { data: { get: () => ({ batchCalls }) } }]]),
+          },
+        },
+      }),
+      useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
+      useProjection: projectionHook([]),
+    })
+    const upgraded = render(<ImageGalleryView {...props([]) as never} />)
+    expect(screen.getAllByRole('article')).toHaveLength(3)
+    upgraded.rerender(<ImageGalleryView {...props([{ callId: 'batch-call', seq: 1 }]) as never} />)
+    expect(screen.getByText('暂无图片结果')).toBeTruthy()
+  })
+
   it('reads a child-owned attachment into the parent draft without changing receipt ownership', async () => {
     const harness = galleryAdmissionHarness(limits)
     const adding = harness.injected.addImageToDraft(attachment, 'child-owner')
@@ -713,7 +839,9 @@ describe('completed artifact terminal', () => {
     })
     const sessions = {
       byId: {
-        [parentId]: { title: '并发卡片', cwd: '/work' },
+        [parentId]: {
+          title: '并发卡片', cwd: '/work', projectionValues: { eMateImageBatches: [{ unrelated: true }] },
+        },
         'child-notice': { projectionValues: { eMateImageReceipts: [
           makeChild('child-notice', 'notice-image', 'notice.png', 90, '1'),
         ] } },
@@ -982,7 +1110,8 @@ describe('completed artifact terminal', () => {
     const source = readFileSync(resolve('src/client/image-gallery.tsx'), 'utf8')
     const contract = readFileSync(resolve('src/client/image-gallery-contract.ts'), 'utf8')
     expect(source).not.toMatch(/querySelector|createPortal|MutationObserver|setInterval/u)
-    expect(source).not.toMatch(/gpt-image|provider|prompt/u)
+    expect(source).not.toMatch(/gpt-image|provider/u)
+    expect(source).toContain('imageBatchRetryTasks(match.event.data.arguments)')
     expect(source).toContain('subagentsByParent')
     expect(source.match(/child_session_id/gu)).toHaveLength(1)
     expect(source).toContain('row.receipt.child_session_id !== undefined')

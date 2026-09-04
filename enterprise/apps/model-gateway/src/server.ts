@@ -1,6 +1,7 @@
 import { createHash, randomUUID, sign, type KeyObject } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
+import { performance } from 'node:perf_hooks';
 import {
   isDefaultEnabledModelRoute,
   parseConsentAcceptanceInput,
@@ -9,6 +10,13 @@ import {
 import { ConsentStoreError, type ConsentStore } from '@e-mate/consent-store';
 import { parseTaskEventInput, type TaskEventInput } from '@e-mate/monitoring-contract';
 import { chatCompletionsToResponsesStream, responsesToChatCompletionsRequest } from './chat-completions-adapter.ts';
+import {
+  createImageObservation,
+  imageFailureCode,
+  type ImageCorrelation,
+  type ImageFailureCode,
+  type ImageObservation,
+} from './image-observability.ts';
 import {
   parseUsageActivityQuery,
   projectUsageActivity,
@@ -69,7 +77,7 @@ const managedCodexModelIds = new Set([
   'deepseek',
   'doubao-seed-2-0-pro-260215',
 ]);
-const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16']);
+const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17']);
 
 const deepSeekSearchCredentialRouteId = 'deepseek-web-search';
 const deepSeekSearchProviderId = 'deepseek-official';
@@ -159,6 +167,8 @@ export type InvocationLimits = {
   tenantMaxConcurrent: number;
   invocationLeaseMs: number;
 };
+
+export class InvocationRequestConflictError extends Error {}
 
 export class InvocationAdmissionError extends Error {
   readonly code: 'TENANT_REQUEST_RATE_LIMITED' | 'TENANT_CONCURRENCY_LIMITED' | 'USER_TOKEN_LIMIT_REACHED';
@@ -476,6 +486,9 @@ export class InMemoryUsageStore implements UsageStore {
       ? [...entry.invocations.entries()].find(([, invocation]) => invocation.state === 'PREPARED')
       : undefined;
     if (pending) {
+      if (pending[1].fact.requestDigest !== fact.requestDigest) {
+        throw new InvocationRequestConflictError('Invocation request digest changed');
+      }
       return { status: 'PENDING', invocationId: pending[0] };
     }
     const completed = entry
@@ -941,6 +954,7 @@ export type ModelGatewayOptions = {
     request: ProviderInvocationReceiptRequest
   ) => Promise<ProviderInvocationReceipt> | ProviderInvocationReceipt;
   upstreamTimeoutMs?: number;
+  imageObservation?: (event: ImageObservation) => void;
 };
 
 export type TenantModelRoutePolicy = {
@@ -1357,6 +1371,35 @@ function headerIdentifier(request: IncomingMessage, name: string): string {
     throw new HttpError(400, 'INVALID_REQUEST_SCOPE', 'Invalid request scope');
   }
   return value;
+}
+
+function imageCorrelation(request: IncomingMessage): ImageCorrelation {
+  const taskId = headerIdentifier(request, 'x-e-mate-task-id');
+  const traceId = headerIdentifier(request, 'x-e-mate-trace-id');
+  const clientRequestId = headerIdentifier(request, 'x-client-request-id');
+  const sessionId = headerIdentifier(request, 'session_id');
+  if (clientRequestId !== sessionId) {
+    throw new HttpError(400, 'INVALID_REQUEST_SCOPE', 'Invalid request scope');
+  }
+  const rawBatchId = request.headers['x-e-mate-batch-id'];
+  const rawOrdinal = request.headers['x-e-mate-batch-ordinal'];
+  if (rawBatchId === undefined && rawOrdinal === undefined) {
+    return { trace_id: traceId, client_request_id: clientRequestId, task_id: taskId };
+  }
+  if (typeof rawBatchId !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(rawBatchId)
+    || typeof rawOrdinal !== 'string' || !/^[1-8]$/.test(rawOrdinal)
+    || !/^sha256:[0-9a-f]{64}$/.test(taskId)
+    || traceId !== `image-${taskId.slice('sha256:'.length)}`
+    || clientRequestId !== traceId) {
+    throw new HttpError(400, 'INVALID_REQUEST_SCOPE', 'Invalid request scope');
+  }
+  return {
+    trace_id: traceId,
+    client_request_id: clientRequestId,
+    task_id: taskId,
+    batch_id: rawBatchId,
+    ordinal: Number(rawOrdinal),
+  };
 }
 
 type ResponseRequestScope = {
@@ -1889,6 +1932,53 @@ async function requireAcceptedConsent(store: ConsentStore | undefined, identity:
   }
 }
 
+type ImageRequestObserver = {
+  readonly submitted: boolean;
+  readonly clientResponseObserved: boolean;
+  emit(stage: ImageObservation['stage'], outcome: ImageObservation['outcome'], failure?: ImageFailureCode): void;
+  markSubmitted(): void;
+  markClientResponse(): void;
+  setFailure(failure: ImageFailureCode): void;
+  failure(cancelled: boolean): ImageFailureCode;
+};
+
+function createImageRequestObserver(
+  callback: ModelGatewayOptions['imageObservation'],
+  correlation: ImageCorrelation
+): ImageRequestObserver | undefined {
+  if (callback === undefined) return undefined;
+  const requestStartedAt = performance.now();
+  let lastStageAt = requestStartedAt;
+  let submitted = false;
+  let clientResponseObserved = false;
+  let knownFailure: ImageFailureCode | undefined;
+  return {
+    get submitted() { return submitted; },
+    get clientResponseObserved() { return clientResponseObserved; },
+    emit(stage, outcome, failure) {
+      const stageStartedAt = lastStageAt;
+      const finishedAt = performance.now();
+      const occurredAt = Date.now();
+      lastStageAt = finishedAt;
+      queueMicrotask(() => {
+        try {
+          callback(createImageObservation(
+            correlation, stage, requestStartedAt, stageStartedAt, finishedAt, occurredAt, outcome, failure
+          ));
+        } catch { /* Observation construction and logging never own request success. */ }
+      });
+    },
+    markSubmitted() { submitted = true; },
+    markClientResponse() { clientResponseObserved = true; },
+    setFailure(failure) { knownFailure = failure; },
+    failure(cancelled) {
+      return knownFailure ?? (submitted
+        ? imageFailureCode({ phase: 'provider', providerSubmitted: true, cancelled })
+        : imageFailureCode({ phase: 'preflight', cancelled }));
+    },
+  };
+}
+
 export function createModelGatewayHandler(options: ModelGatewayOptions) {
   if (
     options.routes.length < 1 ||
@@ -1909,6 +1999,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
   }
 
   return async (request: IncomingMessage, response: ServerResponse) => {
+    let imageObserver: ImageRequestObserver | undefined;
     try {
       const url = new URL(request.url ?? '/', 'http://model-gateway.internal');
       if (url.hash || (
@@ -2056,13 +2147,6 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
                     id: route.id,
                     apiMode: runtimeApiMode(route),
                     upstreamModelId: route.upstreamModelId,
-                    upstreamBaseUrl: route.upstreamBaseUrl,
-                    ...(route.allowInsecureHttpUpstream === true ? { allowInsecureHttpUpstream: true } : {}),
-                    upstreamApiKey: await modelRouteUpstreamApiKey(
-                      options.tenantModelRoutePolicy,
-                      identity.tenantId,
-                      route
-                    ),
                     label: route.label,
                     input: route.input,
                     reasoning: route.reasoning,
@@ -2477,12 +2561,10 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       if (url.pathname === '/v1/images/generations' || url.pathname === '/v1/images/edits') {
         if (request.method !== 'POST') return method(response, 'POST');
         const edit = url.pathname === '/v1/images/edits';
-        const taskId = headerIdentifier(request, 'x-e-mate-task-id');
-        const traceId = headerIdentifier(request, 'x-e-mate-trace-id');
-        const sessionId = headerIdentifier(request, 'session_id');
-        if (headerIdentifier(request, 'x-client-request-id') !== sessionId) {
-          throw new HttpError(400, 'INVALID_REQUEST_SCOPE', 'Invalid request scope');
-        }
+        const correlation = imageCorrelation(request);
+        imageObserver = createImageRequestObserver(options.imageObservation, correlation);
+        const taskId = correlation.task_id;
+        const traceId = correlation.trace_id;
         const editBody = edit ? await readImageEdit(request) : undefined;
         const body: Record<string, unknown> = editBody === undefined
           ? await readJson(request)
@@ -2557,8 +2639,21 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           requestDigest: requestDigest.digest('base64url'),
           routeFingerprint,
         };
-        const prepared = await options.usageStore.prepare(invocationFact);
+        let prepared: PreparedInvocation;
+        try {
+          prepared = await options.usageStore.prepare(invocationFact);
+        } catch (error) {
+          const failure = error instanceof InvocationAdmissionError
+            ? imageFailureCode({ phase: 'admission' })
+            : imageFailureCode({ phase: 'preflight' });
+          imageObserver?.setFailure(failure);
+          imageObserver?.emit('admission_decision', 'failed', failure);
+          throw error;
+        }
         if (prepared.status === 'PENDING') {
+          const failure = imageFailureCode({ phase: 'preflight' });
+          imageObserver?.setFailure(failure);
+          imageObserver?.emit('admission_decision', 'failed', failure);
           throw new HttpError(
             409,
             'INVOCATION_RECONCILIATION_REQUIRED',
@@ -2566,14 +2661,26 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           );
         }
         if (prepared.status === 'RECORDED') {
+          const failure = imageFailureCode({ phase: 'preflight' });
+          imageObserver?.setFailure(failure);
+          imageObserver?.emit('admission_decision', 'failed', failure);
           if (!(await options.usageStore.finalize(identity, taskId))) throw new Error('Image usage finalization failed');
           throw new HttpError(409, 'INVOCATION_RESULT_ALREADY_RECORDED', 'This image invocation was already recorded');
         }
+        if (prepared.status !== 'STARTED') {
+          const failure = imageFailureCode({ phase: 'preflight' });
+          imageObserver?.setFailure(failure);
+          imageObserver?.emit('admission_decision', 'failed', failure);
+          throw new Error('Invalid image invocation admission state');
+        }
+        imageObserver?.emit('admission_decision', 'admitted');
         const clientAbort = new AbortController();
         request.once('aborted', () => clientAbort.abort());
         response.once('close', () => clientAbort.abort());
         const signal = AbortSignal.any([AbortSignal.timeout(timeoutMs), clientAbort.signal]);
         let upstream: Response;
+        imageObserver?.markSubmitted();
+        imageObserver?.emit('provider_submit', 'submitted');
         try {
           upstream = await gatewayFetch(`${route.upstreamBaseUrl.replace(/\/$/, '')}/images/${edit ? 'edits' : 'generations'}`, {
             method: 'POST',
@@ -2588,25 +2695,49 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             signal,
           });
         } catch (error) {
+          const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
+          const failure = imageFailureCode({
+            phase: 'provider',
+            providerSubmitted: true,
+            cancelled: clientAbort.signal.aborted,
+            timedOut,
+            definitelyNotAccepted: (error as { definitelyNotSubmitted?: unknown })?.definitelyNotSubmitted === true,
+          });
+          imageObserver?.setFailure(failure);
+          imageObserver?.emit('provider_outcome', 'failed', failure);
           throw new HttpError(
-            error instanceof DOMException && error.name === 'TimeoutError' ? 504 : 502,
-            error instanceof DOMException && error.name === 'TimeoutError'
-              ? 'UPSTREAM_TIMEOUT'
-              : 'UPSTREAM_UNAVAILABLE',
+            timedOut ? 504 : 502,
+            timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
             'Image provider temporarily unavailable'
           );
         }
         if (!upstream.ok) {
-          if (definitelyRejectedStatuses.has(upstream.status)) {
+          const definitelyRejected = definitelyRejectedStatuses.has(upstream.status);
+          const failure = imageFailureCode({ phase: 'provider', providerSubmitted: true, definitelyRejected });
+          imageObserver?.setFailure(failure);
+          imageObserver?.emit('provider_outcome', 'failed', failure);
+          if (definitelyRejected) {
             await options.usageStore.reject(identity, taskId, prepared.invocationId);
           }
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Image provider rejected the request');
         }
         if (!(upstream.headers.get('content-type') ?? '').includes('application/json')) {
+          const failure = imageFailureCode({ phase: 'provider', providerSubmitted: true });
+          imageObserver?.setFailure(failure);
+          imageObserver?.emit('provider_outcome', 'failed', failure);
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Image provider rejected the request');
         }
         const responseId = `image-${prepared.invocationId}`;
-        const completed = parseImageGenerationResponse(await upstream.json(), responseId);
+        let completed: ReturnType<typeof parseImageGenerationResponse>;
+        try {
+          completed = parseImageGenerationResponse(await upstream.json(), responseId);
+        } catch (error) {
+          const failure = imageFailureCode({ phase: 'provider', providerSubmitted: true });
+          imageObserver?.setFailure(failure);
+          imageObserver?.emit('provider_outcome', 'failed', failure);
+          throw error;
+        }
+        imageObserver?.emit('provider_outcome', 'succeeded');
         await options.usageStore.complete(prepared.invocationId, {
           tenantId: identity.tenantId,
           userId: identity.userId,
@@ -2619,6 +2750,8 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         });
         if (!(await options.usageStore.finalize(identity, taskId))) throw new Error('Image usage finalization failed');
         json(response, 200, completed.body);
+        imageObserver?.emit('client_response', 'succeeded');
+        imageObserver?.markClientResponse();
         return;
       }
       const usageMatch = url.pathname.match(/^\/v1\/usage\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/);
@@ -2633,6 +2766,11 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       }
       throw new HttpError(404, 'NOT_FOUND', 'Not found');
     } catch (error) {
+      if (imageObserver !== undefined && !imageObserver.clientResponseObserved) {
+        const failure = imageObserver.failure(request.destroyed);
+        imageObserver.emit('client_response', 'failed', failure);
+        imageObserver.markClientResponse();
+      }
       if (response.headersSent) {
         if (!response.writableEnded && !response.destroyed) {
           response.write(
@@ -2644,6 +2782,15 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           );
           response.end();
         }
+        return;
+      }
+      if (error instanceof InvocationRequestConflictError) {
+        json(response, 409, {
+          error: {
+            code: 'INVOCATION_REQUEST_CONFLICT',
+            message: 'The task identity is already bound to a different request',
+          },
+        });
         return;
       }
       if (error instanceof InvocationAdmissionError) {

@@ -2,7 +2,9 @@
 
 These rules are the repository's highest-priority engineering contract. Historical notes and evidence do not override them.
 
-The current source target for the e-Mate desktop application is version `2.0.16` in the GitHub repository `zyfjacksonchen-source/e-Mate-desktop`. The stable Electron product name and installed application name remain `e-Mate`; “Desktop” describes the repository scope and does not rename the app or its installation locations. This identity is not evidence that a candidate was built, installed, or publicly released.
+The current source target for the e-Mate desktop application is version `2.0.17` in the GitHub repository `zyfjacksonchen-source/e-Mate-desktop`. The stable Electron product name and installed application name remain `e-Mate`; “Desktop” describes the repository scope and does not rename the app or its installation locations. This identity is not evidence that a candidate was built, installed, or publicly released.
+
+At source level, 2.0.17 includes native `image_batch`, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This is a source capability and compatibility statement only; it makes no candidate, installed, or public-production claim.
 
 ## First principle: sole main-agent governance
 
@@ -20,7 +22,7 @@ Subagents execute development only inside their assigned work order and write se
 
 `desktop/e-mate-desktop` is the only owner of Electron startup, build, platform packaging, installation, replacement, relaunch, and online update. Its implementation follows the pinned `deepseek-harness-desktop` lifecycle; e-Mate changes are limited to branding, the product Profile, enterprise policy, platform-required adapters, and truthful unsigned-distribution behavior.
 
-- When the main agent authorizes candidate work, build and verify through the existing Desktop workspace only: `corepack yarn --cwd desktop check`, `corepack yarn --cwd desktop dist:mac`, and `corepack yarn --cwd desktop dist:win`.
+- When the main agent authorizes candidate work, build and verify through the existing Desktop workspace only, with the process working directory set to `desktop`: `corepack yarn check`, `corepack yarn dist:mac`, and `corepack yarn dist:win`. Do not invoke Desktop Yarn through root Corepack with `--cwd`.
 - macOS candidate builds run locally. Windows candidate builds run on the already signed-in Codex Remote Windows machine; SSH is neither the build path nor installed evidence. Do not introduce GitHub Actions artifacts, a root release coordinator, or another packaging wrapper as a fallback.
 - Keep the macOS package unsigned and unnotarized unless real signing credentials are deliberately introduced. The supported flow downloads the DMG, lets the user grant trust, and replaces `/Applications/e-Mate.app` in place.
 - Keep the Windows package on the native assisted NSIS path. New install and replacement use the same canonical installation directory and shortcut set.

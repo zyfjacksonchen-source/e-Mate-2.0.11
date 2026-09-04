@@ -1,12 +1,12 @@
 - insert:
     - id: emate-computer-use
       name: '@e-mate/dsh-plugin-computer-use'
-      disabled: !!js process.platform !== 'darwin'
+      disabled: !!js Array.of('darwin', 'win32').includes(process.platform) === false
       config:
         observationTtlMs: 0
         interaction:
           focusPolicy: preserve
           keyboardPolicy: activate
           pointerInputPolicy: targeted
-          cursorVisualization: visible
+          cursorVisualization: !!js "process.platform === 'win32' ? 'hidden' : 'visible'"
           cursorAutoHideMs: 0

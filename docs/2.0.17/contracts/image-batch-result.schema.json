@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://e-mate.local/schemas/2.0.17/image-batch-result.schema.json",
+  "title": "e-Mate image_batch terminal result",
+  "description": "Sanitized terminal projection returned by image_batch. It contains pointers, hashes, and canonical existing ImageAttachmentRef values only, never prompts, image bytes, nonces, or provider secrets. images and failures are ordinal-ordered projections, not disjoint sets: an image-bearing failed task appears once in each.",
+  "$ref": "#/$defs/result",
+  "$defs": {
+    "derivedId": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "attachmentId": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nativeId": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\u0000-\u001f\u007f]+$" },
+    "timestamp": { "type": "string", "format": "date-time", "maxLength": 35 },
+    "imageAttachmentRef": {
+      "type": "object", "additionalProperties": false,
+      "required": ["attachmentId", "mediaType", "bytes", "width", "height"],
+      "properties": {
+        "attachmentId": { "$ref": "#/$defs/attachmentId" },
+        "mediaType": { "enum": ["image/png", "image/jpeg", "image/webp"] },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 5242880 },
+        "width": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^\u0000/\\]+$" }
+      }
+    },
+    "receiptRef": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner_session_id", "call_id", "revision", "event_seq", "status"],
+      "properties": {
+        "owner_session_id": { "$ref": "#/$defs/nativeId" },
+        "call_id": { "$ref": "#/$defs/nativeId" },
+        "revision": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "event_seq": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "status": { "enum": ["completed", "failed", "cancelled", "unknown"] }
+      }
+    },
+    "terminalTask": {
+      "type": "object", "additionalProperties": false,
+      "required": ["task_id", "ordinal", "revision", "state", "submission_status", "prompt_sha256", "image_url"],
+      "properties": {
+        "task_id": { "$ref": "#/$defs/derivedId" },
+        "ordinal": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "revision": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "state": { "enum": ["completed", "failed", "cancelled", "unknown", "interrupted"] },
+        "submission_status": { "enum": ["not-submitted", "submitted", "unknown"] },
+        "prompt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "image_url": { "type": "array", "items": { "$ref": "#/$defs/attachmentId" }, "maxItems": 16, "uniqueItems": true },
+        "child_session_id": { "$ref": "#/$defs/nativeId" },
+        "job_id": { "$ref": "#/$defs/nativeId" },
+        "receipt": { "$ref": "#/$defs/receiptRef" },
+        "failure_code": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "updated_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "completed" } }, "required": ["state"] },
+          "then": { "required": ["child_session_id", "job_id", "receipt"], "properties": { "submission_status": { "const": "submitted" } } }
+        },
+        {
+          "if": { "properties": { "state": { "enum": ["failed", "cancelled", "unknown", "interrupted"] } }, "required": ["state"] },
+          "then": { "required": ["failure_code"] }
+        },
+        {
+          "if": { "properties": { "state": { "const": "interrupted" } }, "required": ["state"] },
+          "then": { "properties": { "submission_status": { "const": "not-submitted" } } }
+        }
+      ]
+    },
+    "image": {
+      "type": "object", "additionalProperties": false,
+      "required": ["task_id", "ordinal", "child_session_id", "receipt", "attachment"],
+      "properties": {
+        "task_id": { "$ref": "#/$defs/derivedId" },
+        "ordinal": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "child_session_id": { "$ref": "#/$defs/nativeId" },
+        "receipt": {
+          "allOf": [
+            { "$ref": "#/$defs/receiptRef" },
+            { "properties": { "status": { "const": "completed" } } }
+          ]
+        },
+        "attachment": { "$ref": "#/$defs/imageAttachmentRef" }
+      }
+    },
+    "failure": {
+      "type": "object", "additionalProperties": false,
+      "required": ["task_id", "ordinal", "state", "failure_code"],
+      "properties": {
+        "task_id": { "$ref": "#/$defs/derivedId" },
+        "ordinal": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "state": { "enum": ["failed", "cancelled", "unknown", "interrupted"] },
+        "failure_code": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "child_session_id": { "$ref": "#/$defs/nativeId" },
+        "job_id": { "$ref": "#/$defs/nativeId" },
+        "receipt": { "$ref": "#/$defs/receiptRef" }
+      }
+    },
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "batch_id", "status", "tasks", "images", "failures", "terminal_event_id"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "batch_id": { "$ref": "#/$defs/derivedId" },
+        "status": { "enum": ["completed", "partial", "failed", "cancelled"] },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/terminalTask" }, "minItems": 2, "maxItems": 8 },
+        "images": { "type": "array", "items": { "$ref": "#/$defs/image" }, "maxItems": 8 },
+        "failures": { "type": "array", "items": { "$ref": "#/$defs/failure" }, "maxItems": 8 },
+        "terminal_event_id": { "$ref": "#/$defs/derivedId" }
+      }
+    }
+  }
+}

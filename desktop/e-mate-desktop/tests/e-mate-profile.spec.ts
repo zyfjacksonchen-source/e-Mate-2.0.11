@@ -14,23 +14,93 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { composeEntries } from '@deepseek-ai/dsh-app-boot'
-import { afterEach, describe, expect, it } from 'vitest'
-import {
-  EMATE_DESKTOP_PROFILE_VERSION,
-  EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS,
-  EMATE_BUNDLED_PROFILE_COMPONENT_IDS,
-  cleanupEmateDesktopProfileArtifact,
-  installEmateDesktopProfile,
-} from '../src/e-mate-profile.ts'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+const conversationAdapterUrl = new URL('../../../scripts/harness-conversation-adapter.mjs', import.meta.url).href
+const { adaptNavigationSource, NAVIGATION_PACKAGE } = await import(conversationAdapterUrl) as {
+  adaptNavigationSource(source: string): string
+  NAVIGATION_PACKAGE: string
+}
 import { prepareDesktopProfile } from '../src/profile.ts'
 
 const roots: string[] = []
+
+function navigationEntries(client: string) {
+  const window = { __ModuleLoader__: { load({ factory }: { factory: (require: () => object) => unknown }) { factory(() => ({})) } } }
+  return new Function('window', `${client}\nreturn window.__dspnNavDebug__.buildEntries;`)(window) as
+    (snapshot: unknown) => { key: string; userText: string; modelText: string }[]
+}
+
+describe('e-Mate navigation attachment display', () => {
+  const navigation = readFileSync(new URL(`../node_modules/${NAVIGATION_PACKAGE}/lib/client.js`, import.meta.url), 'utf8')
+  const file = (stored = '报告_带空格_验证.txt', display = '报告 带空格@验证.txt') => ({
+    stored_name: stored, display_name: display, media_type: 'text/plain', relative_path: '.e-mate/imports/' + stored,
+  })
+
+  it('rejects bundle drift, duplicate or already adapted input', () => {
+    expect(() => adaptNavigationSource('future')).toThrow(/expected one 0\.2\.1 seam/u)
+    expect(() => adaptNavigationSource(navigation + navigation)).toThrow(/found 2/u)
+    expect(() => adaptNavigationSource(adaptNavigationSource(navigation))).toThrow(/navigation\/user-text: expected one 0\.2\.1 seam/u)
+    expect(() => adaptNavigationSource(navigation.replace('textOfBlocks(data.content)', 'textOfBlocks(data.blocks)'))).toThrow(/navigation\/user-text: expected one 0\.2\.1 seam/u)
+  })
+
+  it('projects actual buildEntries AX and hover labels without mutating messages or keys', () => {
+    const source = adaptNavigationSource(navigation)
+    const buildEntries = navigationEntries(source)
+    const files = [file(), file('plain.txt', 'literal@name  file.txt')] as const
+    const nodes = [{
+      key: 'user-anchor', kind: 'user',
+      data: {
+        kind: 'user',
+        content: [{ type: 'image' }, { type: 'text', text: `请看 @同事 与 README@v2.md\n@${files[0].relative_path}\n@${files[1].relative_path}\n@${files[0].relative_path}` }],
+        source: { mentions: [
+          ...files.map(value => ({ source: 'e-mate/file-import', ref: JSON.stringify(value) })),
+          { source: 'unrelated', ref: JSON.stringify({ ...files[0], display_name: 'wrong owner' }) },
+          { source: 'e-mate/file-import', ref: 'broken JSON' },
+          { source: 'e-mate/file-import', ref: JSON.stringify({ ...files[0], display_name: '../invalid' }) },
+          { source: 'e-mate/file-import', ref: JSON.stringify(file('unreferenced.txt', 'not in message')) },
+        ] },
+      },
+    }, { key: 'reply', kind: 'assistant', blocks: [{ kind: 'text', text: '回复 @同事' }] }]
+    const snapshot = { chat: { order: nodes.map(node => node.key), nodes: new Map(nodes.map(node => [node.key, node])) } }
+    const before = structuredClone(snapshot)
+    expect(buildEntries(snapshot)).toEqual([{
+      key: 'user-anchor',
+      userText: '[图片] 请看 @同事 与 README@v2.md\n报告 带空格@验证.txt\nliteral@name  file.txt',
+      modelText: '回复 @同事',
+    }])
+    expect(snapshot).toEqual(before)
+    expect(buildEntries({ nodes: [
+      { key: 'legacy-steering', kind: 'steering', content: [{ kind: 'text', text: `@${file().relative_path}` }], source: { mentions: [null, { source: 'e-mate/file-import', ref: '{}' }] } },
+      { key: 'plain', kind: 'user', content: [{ type: 'text', text: '普通 @同事 README@v2.md @workspace/file.txt' }] },
+    ] })).toEqual([
+      { key: 'legacy-steering', userText: file().stored_name, modelText: '' },
+      { key: 'plain', userText: '普通 @同事 README@v2.md @workspace/file.txt', modelText: '' },
+    ])
+    // Both unmodified UI consumers use this shared producer; navigation uses key.
+    expect(source).toMatch(/'aria-label': entry\.userText/u)
+    expect(source).toMatch(/className: 'dspn-tip-user' \}, entries\[tipIndex\]\.userText/u)
+    expect(source).toMatch(/onClick: \(\) => jumpTo\(entry\)/u)
+  })
+})
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 describe('e-Mate desktop profile', () => {
+  type ProfileModule = typeof import('../src/e-mate-profile.ts')
+  let EMATE_DESKTOP_PROFILE_VERSION: ProfileModule['EMATE_DESKTOP_PROFILE_VERSION']
+  let EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS: ProfileModule['EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS']
+  let EMATE_BUNDLED_PROFILE_COMPONENT_IDS: ProfileModule['EMATE_BUNDLED_PROFILE_COMPONENT_IDS']
+  let cleanupEmateDesktopProfileArtifact: ProfileModule['cleanupEmateDesktopProfileArtifact']
+  let installEmateDesktopProfile: ProfileModule['installEmateDesktopProfile']
+  // Navigation source checks do not need a built profile; installation checks do.
+  beforeAll(async () => {
+    ({ EMATE_DESKTOP_PROFILE_VERSION, EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS,
+      EMATE_BUNDLED_PROFILE_COMPONENT_IDS, cleanupEmateDesktopProfileArtifact,
+      installEmateDesktopProfile } = await import('../src/e-mate-profile.ts'))
+  })
+
   it('installs the fixed product profile and replaces legacy CLI update guidance', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
     roots.push(home)
@@ -56,7 +126,16 @@ describe('e-Mate desktop profile', () => {
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('dsh-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-subagent')
-    expect(existsSync(join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar', 'lib', 'client.js'))).toBe(true)
+    const navigationClient = readFileSync(join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar', 'lib', 'client.js'), 'utf8')
+    const importedFile = {
+      stored_name: '报告_验证.txt', relative_path: '.e-mate/imports/报告_验证.txt',
+      display_name: '报告 @验证.txt', media_type: 'text/plain',
+    }
+    expect(navigationEntries(navigationClient)({ nodes: [{
+      key: 'user-anchor', kind: 'user',
+      content: [{ type: 'text', text: `请读 @同事\n@${importedFile.relative_path}` }],
+      source: { mentions: [{ source: 'e-mate/file-import', ref: JSON.stringify(importedFile) }] },
+    }] })).toEqual([{ key: 'user-anchor', userText: '请读 @同事\n报告 @验证.txt', modelText: '' }])
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-genui', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-vision-toolkit', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', 'lib', 'index.mjs'))).toBe(true)
