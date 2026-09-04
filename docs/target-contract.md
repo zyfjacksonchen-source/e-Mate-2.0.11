@@ -1,15 +1,19 @@
-# e-Mate Desktop 2.0.16 target contract
+# e-Mate Desktop 2.0.17 target contract
 
 This is the active repository contract. It supersedes historical release-train notes, evidence matrices, and retired publication flows.
 
 ## Identity and pins
 
 - Product name: `e-Mate`
-- Product version: `2.0.16`
+- Product version: `2.0.17`
 - GitHub repository: `zyfjacksonchen-source/e-Mate-desktop`
 - DSH package baseline: `@deepseek-ai/dsh@0.1.0-rc.7`
 - Harness: `zyfjacksonchen-source/deepseek-harness@4da69d7c3522ee51de12822c917c503a124f7a7d`
 - Desktop reference: `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`
+
+### Source capability and compatibility
+
+The 2.0.17 source capability/compatibility surface includes native `image_batch`, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This states source capability only and makes no candidate, installed, or public-production claim.
 
 All maintained application source is TypeScript/TSX. Generated JavaScript and packaged assets are build output, not a second implementation.
 
@@ -36,8 +40,8 @@ Natural-language update requests only trigger `desktopUpdates.runInteractiveUpda
 ## Build and delivery
 
 - Development uses Node 24.x, root `pnpm@11.7.0`, and the Desktop Yarn lock.
-- Main-agent-authorized macOS packaging uses `corepack yarn --cwd desktop dist:mac` locally on macOS.
-- Main-agent-authorized Windows packaging uses `corepack yarn --cwd desktop dist:win` on the already signed-in Codex Remote Windows host. SSH is not a packaging, GUI acceptance, or installed-evidence path.
+- Main-agent-authorized macOS packaging runs with process workdir `desktop` and uses `corepack yarn dist:mac` locally on macOS.
+- Main-agent-authorized Windows packaging runs with process workdir `desktop` and uses `corepack yarn dist:win` on the already signed-in Codex Remote Windows host. SSH is not a packaging, GUI acceptance, or installed-evidence path.
 - GitHub `e-Mate-desktop` stores source identity, review, and source CI. GitHub Actions, artifacts, tags, and releases are not installer production, installed acceptance, or the public release transport.
 - Cloudflare/R2 is the public-production delivery boundary. Immutable objects must be uploaded and read back before official version and platform pointers are activated.
 - macOS and Windows installers are intentionally unsigned. Documentation and UI must state that truthfully and must not emulate signing or notarization.
@@ -59,4 +63,4 @@ Natural-language update requests only trigger `desktopUpdates.runInteractiveUpda
 3. **Installed:** those exact bytes install, replace in place, and launch on local macOS and the logged-in Codex Remote Windows machine. It proves no public activation.
 4. **Public production:** immutable Cloudflare/R2 objects plus the official version and platform pointers are activated and read back. GitHub state is not a substitute.
 
-Every gate fails closed at the first missing or mismatched fact. Tests and fixtures prove only their named boundary; another candidate, historical receipts, waivers, or narrative approval cannot fill a gap. This contract defines the `2.0.16` source target and makes no claim that installed acceptance, release, or rollback has occurred.
+Every gate fails closed at the first missing or mismatched fact. Tests and fixtures prove only their named boundary; another candidate, historical receipts, waivers, or narrative approval cannot fill a gap. This contract defines the `2.0.17` source target and makes no claim that installed acceptance, release, or rollback has occurred.

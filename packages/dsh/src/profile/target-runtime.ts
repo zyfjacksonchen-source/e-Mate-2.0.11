@@ -15,7 +15,7 @@ export function readManagedBinding(bindingPath = join(import.meta.dirname, 'runt
   if (!isRecord(binding)
     || binding.schema_version !== 1
     || binding.product !== 'e-Mate'
-    || binding.version !== '2.0.16'
+    || binding.version !== '2.0.17'
     || binding.harness_commit !== HARNESS_COMMIT
     || !isAbsolute(binding.dsh_home)
     || !isAbsolute(binding.tools_module)

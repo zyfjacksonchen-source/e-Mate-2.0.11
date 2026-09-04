@@ -17,7 +17,7 @@ test('computer-use adapter preserves Darwin and adds one pinned Windows backend'
   const leases = await readFile(new URL('lib/leases.js', root), 'utf8')
   const upstreamLeases = await readFile(new URL('../../upstream/plugins/dsh-computer-use/lib/leases.js', root), 'utf8')
   const bundle = await readFile(new URL('lib/index.js', root), 'utf8')
-  assert.equal(pkg.version, '2.0.16')
+  assert.equal(pkg.version, '2.0.17')
   assert.equal(pkg.dsh.upstream.commit, '76bfe8607f61945c1cbb84e73976e601100c13a2')
   assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
   assert.match(patch, /disabled: !!js Array\.of\('darwin', 'win32'\)\.includes\(process\.platform\) === false/u)

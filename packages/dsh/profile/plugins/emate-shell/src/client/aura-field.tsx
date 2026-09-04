@@ -437,7 +437,7 @@ export function AuraField() {
     <div className={css.root} data-aura-field data-aura-renderer={renderer} aria-hidden="true">
       <canvas ref={canvasRef} className={css.canvas} />
       <div className={css.fallbackWord}>e-Mate</div>
-      <div className={css.status}>2.0.16 · {pointCount.toLocaleString('en-US')} PTS · <span ref={statusRef}>漂移中</span></div>
+      <div className={css.status}>2.0.17 · {pointCount.toLocaleString('en-US')} PTS · <span ref={statusRef}>漂移中</span></div>
       <div ref={telemetryRef} className={css.telemetry}>θ 0.00 · {pointCount.toLocaleString('en-US')} N</div>
     </div>
   )

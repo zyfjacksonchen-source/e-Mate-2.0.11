@@ -25,7 +25,7 @@ async function createHarness(options: {
     updates: {
       isPackaged: true,
       canDownload: true,
-      currentVersion: '2.0.16',
+      currentVersion: '2.0.17',
       statePath,
       request,
       confirmDownload,
@@ -79,7 +79,7 @@ describe('native desktop update owner', () => {
     expect(harness.rendererCheck).toBe(harness.tray.invoke)
     await expect(harness.ctx.desktopUpdates.runInteractiveUpdate()).resolves.toEqual({
       status: 'handled',
-      installedVersion: '2.0.16',
+      installedVersion: '2.0.17',
     })
     await harness.tray.invoke()
     await harness.runRendererCheck()

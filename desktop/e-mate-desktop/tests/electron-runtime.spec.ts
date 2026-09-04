@@ -538,9 +538,9 @@ describe('Electron compatibility runtime', () => {
     const runtime = new ElectronDesktopRuntime(async () => {})
     const launchInstaller = Reflect.get(runtime, 'launchWindowsUpdateInstaller') as (path: string) => Promise<void>
 
-    const launched = launchInstaller.call(runtime, 'C:\\Downloads\\e-Mate-2.0.16-win-x64-Setup.exe')
+    const launched = launchInstaller.call(runtime, 'C:\\Downloads\\e-Mate-2.0.17-win-x64-Setup.exe')
     expect(childProcess.spawn).toHaveBeenCalledWith(
-      'C:\\Downloads\\e-Mate-2.0.16-win-x64-Setup.exe',
+      'C:\\Downloads\\e-Mate-2.0.17-win-x64-Setup.exe',
       ['--updated', '--force-run'],
       { detached: true, stdio: 'ignore', shell: false, windowsHide: false },
     )
@@ -766,7 +766,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.16',
+        productVersion: '2.0.17',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),

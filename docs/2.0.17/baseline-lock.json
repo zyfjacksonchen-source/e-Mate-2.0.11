@@ -3,7 +3,7 @@
   "id": "EM217-000",
   "active": {
     "release_target": "2.0.17",
-    "current_source_version": "2.0.16",
+    "current_source_version": "2.0.17",
     "emate_repository": "zyfjacksonchen-source/e-Mate-desktop",
     "emate_baseline_sha": "f876f01d8280e4ab20fe83b88c36c7fe7a662135",
     "harness_package": "@deepseek-ai/dsh@0.1.0-rc.7",

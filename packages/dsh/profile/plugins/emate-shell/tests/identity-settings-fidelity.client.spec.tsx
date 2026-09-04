@@ -38,7 +38,7 @@ afterEach(() => {
   history.replaceState(null, '', '/')
 })
 
-describe('e-Mate 2.0.16 identity and settings fidelity', () => {
+describe('e-Mate 2.0.17 identity and settings fidelity', () => {
   it('keeps the AURA login contract and current SettingsDialog copy', () => {
     const identity = readFileSync(join(process.cwd(), 'src/client/identity.module.css'), 'utf8')
     const identityView = readFileSync(join(process.cwd(), 'src/client/identity.tsx'), 'utf8')

@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-computer-use",
-  "version": "2.0.16",
+  "version": "2.0.17",
   "description": "e-Mate native macOS and Windows Computer Use adapter on the pinned rc.7 runtime",
   "type": "module",
   "main": "lib/index.js",

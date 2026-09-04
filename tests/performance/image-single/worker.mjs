@@ -92,7 +92,7 @@ function writeBinding(root, dshHome) {
   const zod = realpathSync(PATHS.zod)
   const path = join(root, 'runtime-binding.json')
   writeFileSync(path, JSON.stringify({
-    schema_version: 1, product: 'e-Mate', version: '2.0.16', dsh_home: dshHome, harness_commit: HARNESS_COMMIT,
+    schema_version: 1, product: 'e-Mate', version: '2.0.17', dsh_home: dshHome, harness_commit: HARNESS_COMMIT,
     tools_module: PATHS.tools, tools_module_sha256: fileSha256(PATHS.tools),
     llm_module: PATHS.llm, llm_module_sha256: fileSha256(PATHS.llm),
     storage_domain_module: PATHS.storage, storage_domain_module_sha256: fileSha256(PATHS.storage),

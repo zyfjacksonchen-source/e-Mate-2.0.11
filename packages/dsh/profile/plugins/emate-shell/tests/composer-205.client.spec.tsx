@@ -33,7 +33,7 @@ afterEach(() => {
   delete document.body.dataset.dshDesktopPlatform
 })
 
-describe('e-Mate 2.0.16 composer projection', () => {
+describe('e-Mate 2.0.17 composer projection', () => {
   it('routes external connections into the existing collaboration capability surface', () => {
     const openConnections = vi.fn()
     render(<ComposerConnectors LinkIcon={Icon} openConnections={openConnections} />)

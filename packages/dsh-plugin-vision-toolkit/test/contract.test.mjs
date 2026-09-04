@@ -56,7 +56,7 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
     readFile(new URL('lib/client.js', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  assert.equal(pkg.version, '2.0.16')
+  assert.equal(pkg.version, '2.0.17')
   assert.equal(pkg.dsh.visionToolkit.adapterState, 'managed')
   assert.equal(pkg.dsh.visionToolkit.upstreamCommit, 'bc9803d7d6300c864d17460ecbb33540b26638e0')
   assert.equal(pkg.dsh.upstream.commit, '29850a83871d4b7a7cc13e251420c5a440e2f69e')

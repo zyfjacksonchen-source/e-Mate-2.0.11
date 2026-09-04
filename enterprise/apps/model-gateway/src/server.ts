@@ -77,7 +77,7 @@ const managedCodexModelIds = new Set([
   'deepseek',
   'doubao-seed-2-0-pro-260215',
 ]);
-const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16']);
+const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17']);
 
 const deepSeekSearchCredentialRouteId = 'deepseek-web-search';
 const deepSeekSearchProviderId = 'deepseek-official';

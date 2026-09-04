@@ -3138,7 +3138,6 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     for (const clientVersion of [
       '',
       '2.0.11',
-      '2.0.17',
       '99.0.0',
       '2.1.0-rc.1',
       '2.0.15_rc1',
@@ -3187,7 +3186,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         upstreamApiKey: searchKey,
       },
     });
-    for (const clientVersion of ['2.0.13', '2.0.14', '2.0.15', '2.0.16']) {
+    for (const clientVersion of ['2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17']) {
       const currentClientResponse = await fetch(
         `${baseUrl}/v1/runtime-models?client_version=${clientVersion}`,
         { headers: auth() },
@@ -3195,8 +3194,8 @@ test('delivers only the authenticated tenant runtime model routes without exposi
       assert.equal(currentClientResponse.status, 200);
       assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
     }
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 5);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 5);
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 6);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 6);
     assert.equal(keyCalls.includes(luna.id), false);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
     assert.doesNotMatch(JSON.stringify(releasedClientBody.models), /provider-key|provider\.example/u);
