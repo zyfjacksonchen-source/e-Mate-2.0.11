@@ -125,11 +125,22 @@ describe('e-Mate 2.0.17 composer projection', () => {
       <textarea defaultValue="" />
       <FileImportControl
         sessionId="session-1"
-        input={{ draft: '', phase: 'plain', fileRefs: [] }}
-        inputActions={{ addFiles: () => true, removeFile() {} }}
+        input={{
+          draft: '', phase: 'plain', fileRefs: [], imageIds: [], imageRefs: [], hydratedImageKeys: [],
+          runtimeOnlyImageIds: [], imageStagePending: false,
+        }}
+        inputActions={{
+          addFiles: () => true, removeFile() {}, beginImageStage: () => true, cancelImageStage() {},
+          addDurableImages: () => true, hydrateDurableImage: () => true, removeDurableImage: () => undefined,
+        }}
         isLoopback
-        callImport={async () => ({ ok: true })}
-        addImages={() => null}
+        call={async () => ({ ok: true })}
+        createDraftImages={() => []}
+        draftImages={() => []}
+        releaseDraftImages={() => {}}
+        readAttachment={async () => ({ ok: false, error: { code: 'internal', message: 'unused', details: {} } })}
+        imageLimits={() => undefined}
+        notify={() => {}}
         renderComposer={({ controls }) => <>{controls}</>}
       />
       <ComposerMentions openMentions={() => {}} />
@@ -150,7 +161,7 @@ describe('e-Mate 2.0.17 composer projection', () => {
     expect([glyphStyle.fontSize, glyphStyle.lineHeight]).toEqual(['16px', '16px'])
   })
 
-  it('keeps a picked @电脑操控 reference visible in the native composer', () => {
+  it('keeps a picked @电脑操控 reference visible in the native composer', async () => {
     document.body.dataset.dshDesktopPlatform = 'darwin'
     let registered: InputTriggerSource | undefined
     registerComputerUseTrigger({
@@ -172,7 +183,7 @@ describe('e-Mate 2.0.17 composer projection', () => {
       insert: { source: '电脑操控', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' },
     })
     const signal = new AbortController().signal
-    expect(registered?.codec?.serialize('computer-use', signal)).resolves.toBe('@电脑操控')
+    await expect(registered?.codec?.serialize('computer-use', signal)).resolves.toBe('@电脑操控')
     expect(readFileSync('src/client/home.module.css', 'utf8')).toContain("font-family: 'DshChipCell', -apple-system")
   })
 

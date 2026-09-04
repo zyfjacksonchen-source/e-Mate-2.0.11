@@ -86,6 +86,7 @@ assert.deepEqual(fileImport.write_set, [
   'tests/regression/2.0.17/inventory.json',
   'tests/regression/2.0.17/inventory.test.mjs',
   'packages/dsh-plugin-file-import/**',
+  'packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx',
   'scripts/harness-conversation-adapter.mjs',
   'scripts/harness-conversation-adapter.test.mjs',
 ])
