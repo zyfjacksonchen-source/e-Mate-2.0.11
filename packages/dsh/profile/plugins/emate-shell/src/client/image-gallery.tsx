@@ -32,7 +32,11 @@ import {
   parseImageOutputReceipt,
   type ImageGalleryItem,
 } from './image-gallery-contract.ts'
-import { useImageBatchProjection, type ImageBatchClientBatch } from './image-batch-client.ts'
+import {
+  useImageBatchProjection,
+  type ImageBatchClientBatch,
+  type ImageBatchClientView,
+} from './image-batch-client.ts'
 import {
   ImageBatchProgress,
   type ImageBatchRetryCall,
@@ -561,6 +565,39 @@ function exactBatches(view: readonly ImageBatchClientBatch[], callIds: readonly 
   return callIds.flatMap(callId => byCall.get(callId) ?? [])
 }
 
+/** Use legacy child discovery unless exact batch state or a logged image_batch call owns the Session. */
+export function schemaAwareChildGalleryImageItems(
+  sessions: Pick<SessionListState, 'byId' | 'subagentsByParent'>,
+  parentSessionId: string,
+  batchView: ImageBatchClientView,
+  hasLoggedBatchCall = false,
+): readonly ImageGalleryItem[] {
+  const items = childGalleryImageItems(sessions, parentSessionId)
+  if (batchView.batches.length === 0) return hasLoggedBatchCall ? [] : items
+  const childIds = new Set(batchView.batches.flatMap(batch => batch.tasks.flatMap(task => task.childSessionId ?? [])))
+  const pointers = new Set(batchView.batches.flatMap(batch => batch.tasks.flatMap(task => {
+    const child = task.childSessionId
+    const receipt = task.receipt
+    return child === undefined || receipt === undefined
+      ? []
+      : [batchReceiptKey(child, receipt.callId, receipt.revision, receipt.eventSeq)]
+  })))
+  return items.filter(item => {
+    const source = item.source as (ImageGalleryItem['source'] & { readonly receiptEventSeq?: number })
+    if (source === undefined || !childIds.has(source.sessionId)) return true
+    return source.receiptEventSeq !== undefined
+      && pointers.has(batchReceiptKey(source.sessionId, item.callId, item.revision, source.receiptEventSeq))
+  })
+}
+
+function snapshotHasImageBatchCall(snapshot: ConversationSnapshot): boolean {
+  for (const turn of snapshot.turns.values()) {
+    const data = turn.data.get('e-mate-image-calls')
+    if ((data?.batchCalls?.length ?? 0) > 0) return true
+  }
+  return false
+}
+
 const imageLabels = {
   image: '图像',
   open: '查看原图',
@@ -688,8 +725,9 @@ export function ImageGalleryView({
   const title = sessions.byId[sessionId]?.title
   const input = useInput(value => value)
   const limits = useProjection('imageLimits')
+  const batchView = useImageBatchProjection(useProjection, sessionId)
   const items = namedGalleryImageItems([
-    ...childGalleryImageItems(sessions, sessionId),
+    ...schemaAwareChildGalleryImageItems(sessions, sessionId, batchView, snapshotHasImageBatchCall(snapshot)),
     ...galleryImageItems(snapshot.chat.nodes.values()),
   ], title ?? '')
   const [query, setQuery] = useState('')
@@ -959,11 +997,11 @@ function FileTerminal({ paths, openFile, openMenu }: {
 }
 
 const NO_BATCHES: readonly ImageBatchClientBatch[] = []
-const NO_BATCH_RECEIPTS: ReadonlySet<string> = new Set()
+const NO_BATCH_CHILD_IDS: ReadonlySet<string> = new Set()
 
 interface ArtifactTerminalBodyProps extends ArtifactTerminalProps {
   readonly batches: readonly ImageBatchClientBatch[]
-  readonly batchReceipts: ReadonlySet<string>
+  readonly batchChildIds: ReadonlySet<string>
 }
 
 function BatchArtifactTerminal(props: ArtifactTerminalProps & { readonly batchCallIds: readonly string[] }) {
@@ -972,28 +1010,27 @@ function BatchArtifactTerminal(props: ArtifactTerminalProps & { readonly batchCa
     () => exactBatches(batchView.batches, props.batchCallIds),
     [batchView, props.batchCallIds],
   )
-  const batchReceipts = useMemo(() => new Set(batches.flatMap(batch => batch.tasks.flatMap(task => {
-    const child = task.childSessionId
-    const receipt = task.receipt
-    return child === undefined || receipt === undefined
-      ? []
-      : [batchReceiptKey(child, receipt.callId, receipt.revision, receipt.eventSeq)]
-  }))), [batches])
-  return <ArtifactTerminalBody {...props} batches={batches} batchReceipts={batchReceipts} />
+  const batchChildIds = useMemo(() => new Set(batches.flatMap(
+    batch => batch.tasks.flatMap(task => task.childSessionId ?? []),
+  )), [batches])
+  return <ArtifactTerminalBody {...props} batches={batches} batchChildIds={batchChildIds} />
 }
 
 /** Select the batch-aware tail without subscribing legacy artifact terminals to batch state. */
 export function ArtifactTerminal(props: ArtifactTerminalProps) {
   const batchCallIds = props.matched.batchCallIds
   return batchCallIds === undefined || batchCallIds.length === 0
-    ? <ArtifactTerminalBody {...props} batches={NO_BATCHES} batchReceipts={NO_BATCH_RECEIPTS} />
+    ? <ArtifactTerminalBody
+        {...props} batches={NO_BATCHES} batchChildIds={NO_BATCH_CHILD_IDS}
+      />
     : <BatchArtifactTerminal {...props} batchCallIds={batchCallIds} />
 }
 
 /** Render hidden image receipts, native deliverables, and optional exact batch progress. */
 function ArtifactTerminalBody({
   matched, sessionId, turn, useSession, useSessions, useInput, useProjection,
-  openFile, loadImage, prepareImageRetry, addImageToDraft, draftBytes, notify, runResource, batches, batchReceipts,
+  openFile, loadImage, prepareImageRetry, addImageToDraft, draftBytes, notify, runResource,
+  batches, batchChildIds,
 }: ArtifactTerminalBodyProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -1004,23 +1041,22 @@ function ArtifactTerminalBody({
   const limits = useProjection('imageLimits')
   const sessions = useSessions(value => value)
   const summary = sessions.byId[sessionId]
+  const ambiguousBatch = (matched.batchCallIds?.length ?? 0) > 0 && batches.length === 0
   const root = summary?.cwd
   const items = useMemo(
     () => {
       const nodes = [...snapshot.chat.nodes.values()]
       return namedGalleryImageItems([
         ...terminalImageItems(nodes, matched.callIds, turn.turn),
-        ...terminalChildImageItems(
-          childGalleryImageItems(sessions, sessionId).filter(item => {
-            const source = item.source as (ImageGalleryItem['source'] & { readonly receiptEventSeq?: number })
-            return source === undefined || source.receiptEventSeq === undefined
-              || !batchReceipts.has(batchReceiptKey(source.sessionId, item.callId, item.revision, source.receiptEventSeq))
-          }),
+        ...ambiguousBatch ? [] : terminalChildImageItems(
+          childGalleryImageItems(sessions, sessionId).filter(
+            item => item.source === undefined || !batchChildIds.has(item.source.sessionId),
+          ),
           matched.childSessionIds, matched.foregroundWindow, settledChildSessions(nodes),
         ),
       ], summary?.title ?? '')
     },
-    [batchReceipts, matched.callIds, matched.childSessionIds, matched.foregroundWindow, sessionId, sessions, snapshot, summary?.title, turn.turn],
+    [ambiguousBatch, batchChildIds, matched.callIds, matched.childSessionIds, matched.foregroundWindow, sessionId, sessions, snapshot, summary?.title, turn.turn],
   )
   const seenFailures = useRef(new Set<string>())
   const existingBytes = draftBytes(input.imageIds)

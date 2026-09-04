@@ -907,7 +907,10 @@
       "write_set": [
         "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-client.ts",
         "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
-        "packages/dsh/profile/plugins/emate-shell/tests/**"
+        "packages/dsh/profile/plugins/emate-shell/tests/image-batch-client.client.spec.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/image-batch-progress.client.spec.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+        "docs/2.0.17/work-orders.json"
       ],
       "implementation": [
         "刷新、窗口重开、应用重启后从 durable projection 重建。",
@@ -919,10 +922,10 @@
         "旧 2.0.16 会话截图/fixture 不回退。"
       ],
       "tests": [
-        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/image-batch-client.client.spec.tsx tests/image-batch-progress.client.spec.tsx tests/image-gallery.client.spec.tsx (from packages/dsh/profile/plugins/emate-shell)",
         "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
       ],
-      "rollback": "禁用新 batch adapter；legacy adapter 保留。",
+      "rollback": "移除 exact-batch/logged-call authority 判定和 schema-aware child selector；2.0.16 legacy child reader 保留。",
       "risk": "高"
     },
     {

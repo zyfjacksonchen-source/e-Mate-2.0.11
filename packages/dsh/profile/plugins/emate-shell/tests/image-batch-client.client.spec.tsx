@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ProjectionValueStore } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/projection-store.ts'
@@ -106,6 +106,8 @@ describe('image batch native projection client', () => {
     expect(view.batches[0]?.batchId).toBe(batchId)
     expect(input).toEqual(before)
     expect(createImageBatchProjectionSelector(parentSessionId)({ nope: true }).batches).toEqual([])
+    expect(createImageBatchProjectionSelector(parentSessionId)([]).batches).toEqual([])
+    expect(createImageBatchProjectionSelector(parentSessionId)([{ schema_version: 1, batch_id: 'bad' }]).batches).toEqual([])
   })
 
   it('uses rc.7 higher-seq-wins delivery and cleans the native hook subscription on unmount', async () => {
@@ -142,6 +144,24 @@ describe('image batch native projection client', () => {
     expect(surroundingRenders).toBe(1)
     rendered.unmount()
     expect(subscriptions).toBe(0)
+  })
+
+  it('rehydrates from a replacement native projection store with new wire identities', () => {
+    const firstStore = new ProjectionValueStore()
+    const secondStore = new ProjectionValueStore()
+    firstStore.apply('eMateImageBatches', projection(['completed', 'failed'], { revisions: [3, 4], terminal: true }), 20)
+    secondStore.apply('eMateImageBatches', structuredClone(
+      projection(['completed', 'failed'], { revisions: [3, 4], terminal: true }),
+    ), 20)
+    function Reader({ store }: { store: ProjectionValueStore }) {
+      const view = useImageBatchProjection(hookFor(store), parentSessionId)
+      return <output>{view.batches[0]?.tasks.map(task => [task.ordinal, task.state, task.failureCode].join(':')).join('|')}</output>
+    }
+    const mounted = render(<Reader store={firstStore} />)
+    const live = screen.getByRole('status').textContent
+    mounted.rerender(<Reader store={secondStore} />)
+    expect(screen.getByRole('status').textContent).toBe(live)
+    expect(screen.getByRole('status').textContent).toBe('1:completed:|2:failed:task-failed')
   })
 
   it('integrates the reader only for batch tails and preserves legacy imagegen closure', () => {

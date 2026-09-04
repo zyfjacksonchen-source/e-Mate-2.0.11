@@ -257,7 +257,7 @@ describe('live image batch progress', () => {
     expect(loadImage).toHaveBeenCalledWith(attachment, 'child-1')
   })
 
-  it('keeps one batch card across open-close and excludes only its exact legacy receipt', () => {
+  it('keeps one exact batch card and preserves unrelated explicit children across open-close', () => {
     const store = new ProjectionValueStore()
     store.apply('eMateImageBatches', projection(['completed', 'failed'], { revisions: [3, 3], terminal: true }), 1)
     const sessions = sessionHarness({ ...emptySessions(), byId: {

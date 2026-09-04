@@ -14,6 +14,7 @@ import {
   imageCallsDefinition,
   namedGalleryImageItems,
   selectArtifactTerminal,
+  schemaAwareChildGalleryImageItems,
   subagentSettledDefinition,
   terminalChildImageItems,
   terminalImageItems,
@@ -146,7 +147,9 @@ function galleryProps(
 ) {
   return {
     sessionId,
-    useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => nodes.values() } } }),
+    useSession: (selector: (value: unknown) => unknown) => selector({
+      chat: { nodes: { values: () => nodes.values() } }, turns: new Map(),
+    }),
     useSessions: (selector: (value: unknown) => unknown) => selector({
       byId: { [sessionId]: {} }, subagentsByParent: {},
     }),
@@ -538,6 +541,63 @@ describe('completed artifact terminal', () => {
       .toHaveLength(4)
   })
 
+  it('keeps empty upgrade projection legacy until exact batch state or a logged call exists', () => {
+    const parentId = 'schema-parent'
+    const row = (child: string, call: string, seq: number, suffix: string) => ({
+      seq, createdAt: seq, receipt: receipt({
+        parent_session_id: child, call_id: call,
+        content: [{ type: 'image', attachment: {
+          ...attachment, attachmentId: 'sha256:' + suffix.repeat(64), name: call + '.png',
+        } }],
+        output: { ...attachment, attachmentId: 'sha256:' + suffix.repeat(64), name: call + '.png' },
+      }),
+    })
+    const exact = row('child-exact', 'call-exact', 7, 'b')
+    const wrongPointer = row('child-exact', 'call-wrong', 9, 'd')
+    const foreign = row('child-foreign', 'call-foreign', 8, 'c')
+    const sessions = {
+      byId: {
+        'child-exact': { projectionValues: { eMateImageReceipts: [exact, wrongPointer] } },
+        'child-foreign': { projectionValues: { eMateImageReceipts: [foreign] } },
+        'child-empty': { projectionValues: {} },
+      },
+      subagentsByParent: { [parentId]: { entries: [
+        { kind: 'child', id: 'child-exact', label: '同名任务', mode: 'one-shot' },
+        { kind: 'child', id: 'child-foreign', label: '同名任务', mode: 'one-shot' },
+        { kind: 'child', id: 'child-empty', label: '同名任务', mode: 'one-shot' },
+      ] } },
+    }
+    const emptyUpgradeProjection = { batches: [], batchesById: {} }
+    expect(schemaAwareChildGalleryImageItems(sessions as never, parentId, emptyUpgradeProjection).map(item => item.callId))
+      .toEqual(['call-exact', 'call-foreign', 'call-wrong'])
+
+    const task = { childSessionId: 'child-exact', receipt: {
+      ownerSessionId: 'child-exact', callId: 'call-exact', revision: 2, eventSeq: 7, status: 'completed',
+    } }
+    const batch = { batches: [{ tasks: [task] }], batchesById: {} }
+    expect(schemaAwareChildGalleryImageItems(sessions as never, parentId, batch as never).map(item => item.callId))
+      .toEqual(['call-exact', 'call-foreign'])
+    expect(schemaAwareChildGalleryImageItems(
+      sessions as never, parentId, emptyUpgradeProjection, true,
+    )).toEqual([])
+    expect(schemaAwareChildGalleryImageItems(
+      sessions as never, parentId, { batches: [], batchesById: {} }, true,
+    )).toEqual([])
+
+    const props = (batchCalls: readonly unknown[]) => galleryProps(parentId, [], {
+      useSession: (selector: (value: unknown) => unknown) => selector({
+        chat: { nodes: { values: () => [][Symbol.iterator]() } },
+        turns: new Map([[1, { data: { get: () => ({ batchCalls }) } }]]),
+      }),
+      useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
+      useProjection: (key: string) => key === 'eMateImageBatches' ? [] : limits,
+    })
+    const upgraded = render(<ImageGalleryView {...props([]) as never} />)
+    expect(screen.getAllByRole('article')).toHaveLength(3)
+    upgraded.rerender(<ImageGalleryView {...props([{ callId: 'batch-call', seq: 1 }]) as never} />)
+    expect(screen.getByText('暂无图片结果')).toBeTruthy()
+  })
+
   it('reads a child-owned attachment into the parent draft without changing receipt ownership', async () => {
     const harness = galleryAdmissionHarness(limits)
     const adding = harness.injected.addImageToDraft(attachment, 'child-owner')
@@ -764,7 +824,9 @@ describe('completed artifact terminal', () => {
     })
     const sessions = {
       byId: {
-        [parentId]: { title: '并发卡片', cwd: '/work' },
+        [parentId]: {
+          title: '并发卡片', cwd: '/work', projectionValues: { eMateImageBatches: [{ unrelated: true }] },
+        },
         'child-notice': { projectionValues: { eMateImageReceipts: [
           makeChild('child-notice', 'notice-image', 'notice.png', 90, '1'),
         ] } },
