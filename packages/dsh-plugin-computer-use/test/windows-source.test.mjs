@@ -154,11 +154,21 @@ test('helper and stderr text never reaches caller-visible errors', async () => {
   } finally { await rm(managedRoot, { recursive: true, force: true }) }
 })
 
+test('cancellation during asynchronous preparation is rejected before spawn', async () => {
+  const managedRoot = await fixtureRoot(); const controller = new AbortController(); let spawns = 0
+  const process = completedHandle()
+  const client = new WindowsHelperClient({ subprocess: { spawn() { spawns += 1; return process.handle } } }, 120000, managedRoot, 'win32', {
+    environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => controller.abort(),
+  })
+  try { await assert.rejects(client.invoke({ command: 'health' }, controller.signal), /COMPUTER_CANCELLED/u); assert.equal(spawns, 0) } finally { await rm(managedRoot, { recursive: true, force: true }) }
+})
+
 test('cancellation terminates and reaps the subprocess tree', async () => {
   const managedRoot = await fixtureRoot(); let terminate = 0; let wait = 0
   const handle = { done: new Promise(() => {}), collected: { stdout: reader(''), stderr: reader('') }, terminate: () => { terminate += 1 }, waitForExit: async () => { wait += 1; return true } }
-  const client = new WindowsHelperClient({ subprocess: { spawn() { return handle } } }, 120000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} }); const controller = new AbortController()
-  try { const pending = client.invoke({ command: 'health' }, controller.signal); setTimeout(() => controller.abort(), 10); await assert.rejects(pending, /COMPUTER_CANCELLED/u); assert.equal(terminate, 1); assert.equal(wait, 1) } finally { await rm(managedRoot, { recursive: true, force: true }) }
+  const controller = new AbortController()
+  const client = new WindowsHelperClient({ subprocess: { spawn() { queueMicrotask(() => controller.abort()); return handle } } }, 120000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} })
+  try { await assert.rejects(client.invoke({ command: 'health' }, controller.signal), /COMPUTER_CANCELLED/u); assert.equal(terminate, 1); assert.equal(wait, 1) } finally { await rm(managedRoot, { recursive: true, force: true }) }
 })
 
 test('Windows cursor configuration is hidden and visible mode cannot silently no-op', async () => {

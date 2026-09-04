@@ -169,6 +169,7 @@ export class WindowsHelperClient {
     const prepared = await this.prepare(signal)
     const powershell = this.powershellPath()
     await this.validateExecutable(powershell)
+    if (signal.aborted) throw new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled')
     const timeout = AbortSignal.timeout(this.timeoutMs)
     const combined = AbortSignal.any([signal, timeout])
     let handle: SubprocessHandle
