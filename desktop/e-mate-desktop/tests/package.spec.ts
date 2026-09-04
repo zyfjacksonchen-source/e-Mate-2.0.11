@@ -162,11 +162,12 @@ describe('published package surface', () => {
     expect(config).toContain("entryFileNames: 'preload.cjs'")
   })
 
-  it('keeps target Python preparation out of portable source checks', () => {
+  it('keeps host-only preparation and profile boot out of portable source checks', () => {
     expect(manifest.scripts?.build).toBe('yarn run prepare:python && yarn run build:sdk')
     expect(manifest.scripts?.['build:sdk']).not.toContain('prepare:python')
-    expect(manifest.scripts?.['check:source']).toBe('yarn run build:sdk && yarn run typecheck && yarn run test && yarn run verify:closure && yarn run verify:cli && yarn run verify:loader && yarn run verify:profile && yarn run verify:licenses')
-    expect(manifest.scripts?.check).toBe('yarn run prepare:python && yarn run check:source')
+    expect(manifest.scripts?.['check:source']).toBe('yarn run build:sdk && yarn run typecheck && yarn run test && yarn run verify:closure && yarn run verify:cli && yarn run verify:loader && yarn run verify:licenses')
+    expect(manifest.scripts?.['check:source']).not.toContain('verify:profile')
+    expect(manifest.scripts?.check).toBe('yarn run prepare:python && yarn run check:source && yarn run verify:profile')
   })
 
   it('installs Host command PATHs after the launch snapshot and before profile boot', () => {
