@@ -408,7 +408,11 @@ function frontmatter(payload) {
   if (tags.length > 32 || tags.some(tag => !TAG.test(tag)) || new Set(tags).size !== tags.length) {
     throw archiveError('SKILL.md tags must be unique bounded identifiers')
   }
-  return { name, description, version, license, compatibility, tags: [...tags].sort(compareCodePoints) }
+  const heading = lines.slice(closing + 1).find(line => line.startsWith('# '))
+  return {
+    metadata: { name, description, version, license, compatibility, tags: [...tags].sort(compareCodePoints) },
+    title: heading === undefined ? name : bounded(heading.slice(2), 'title', 160),
+  }
 }
 
 function canonicalJson(value) {
@@ -433,7 +437,7 @@ export async function inspectSkillArchive(payload) {
   const files = new Map()
   for (const record of records) files.set(record.path, await inflate(payload, record))
   if (!files.has('SKILL.md')) throw archiveError('one root SKILL.md is required')
-  const metadata = frontmatter(files.get('SKILL.md'))
+  const { metadata, title } = frontmatter(files.get('SKILL.md'))
   const manifestFiles = []
   let total = 0
   for (const [path, content] of [...files].sort(([left], [right]) => compareCodePoints(left, right))) {
@@ -449,6 +453,7 @@ export async function inspectSkillArchive(payload) {
   }
   return {
     ...metadata,
+    title,
     packageSha256: await sha256(concat(CAS_PREFIX, new TextEncoder().encode(canonicalJson(manifest)))),
     archiveSha256: await sha256(payload),
   }
@@ -638,7 +643,7 @@ async function publish(request, env, config, fetchImplementation) {
       statement(env,
         'INSERT INTO skill_hub_versions(slug,version,version_sort,package_sha256,archive_sha256,package_size_bytes,title,summary,category,tags_json,uploader_nickname,author_ref,original_platform,original_url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         [inspected.name, inspected.version, versionSort(inspected.version), inspected.packageSha256, inspected.archiveSha256,
-          payload.byteLength, inspected.name, inspected.description, value.category, JSON.stringify(inspected.tags),
+          payload.byteLength, inspected.title, inspected.description, value.category, JSON.stringify(inspected.tags),
           'e-Mate 用户', auth.author, null, null],
       ),
       statement(env,

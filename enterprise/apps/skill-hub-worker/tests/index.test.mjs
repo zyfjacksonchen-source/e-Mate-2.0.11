@@ -248,6 +248,31 @@ test('matches the DSH client canonical Skill digest', async () => {
   assert.equal(inspected.packageSha256, 'c268e7ed14e5aa798362b40d25a981d21b7c9d02e457ccc7f36d6da2150b7042')
 })
 
+test('publishes a bounded root heading as the shared catalog title', async () => {
+  const env = environment()
+  const payload = zip({
+    'SKILL.md': [
+      '---',
+      'name: xhs-note-analyzer',
+      'description: Shared Xiaohongshu note analysis',
+      'version: 1.1.0',
+      '---',
+      '',
+      '# 小红书笔记分析',
+      '',
+    ].join('\n'),
+  })
+  const published = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: publicationBody(payload, 'xhs-note-analyzer', 'content_creation', 'publish:xhs-title-0001'),
+  }, 'user-1')
+  assert.equal(published.status, 201)
+  assert.equal((await published.clone().json()).title, '小红书笔记分析')
+
+  const catalog = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills?query=%E5%B0%8F%E7%BA%A2%E4%B9%A6&limit=24', {}, 'user-2')
+  assert.deepEqual((await catalog.json()).items, [await published.json()])
+})
+
 test('rejects an existing R2 object whose full package metadata is not the published identity', async () => {
   const env = environment()
   const payload = skill('r2-identity', '1.0.0')
