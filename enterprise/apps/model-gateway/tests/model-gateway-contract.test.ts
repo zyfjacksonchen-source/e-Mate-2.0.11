@@ -3177,39 +3177,41 @@ test('delivers only the authenticated tenant runtime model routes without exposi
       });
     }
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models`, { method: 'POST', headers: runtimeAuth() })).status, 405);
-    const response = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.17`, { headers: runtimeAuth() });
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get('cache-control'), 'no-store');
-    assert.equal(response.headers.get('access-control-allow-origin'), null);
-    const releasedClientBody = await response.json();
-    assert.deepEqual(releasedClientBody, {
-      schemaVersion: 1,
-      models: [{
-        id: luna.id,
-        apiMode: 'responses',
-        upstreamModelId: luna.upstreamModelId,
-        label: luna.label,
-        input: luna.input,
-        reasoning: true,
-        contextWindow: luna.contextWindow,
-        maxTokens: luna.maxTokens,
-      }],
-      searchCredentialGrant: {
+    for (const clientVersion of ['2.0.17', '2.0.18']) {
+      const response = await fetch(`${baseUrl}/v1/runtime-models?client_version=${clientVersion}`, { headers: runtimeAuth() });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.equal(response.headers.get('access-control-allow-origin'), null);
+      const releasedClientBody = await response.json();
+      assert.deepEqual(releasedClientBody, {
         schemaVersion: 1,
-        status: 'granted',
-        purpose: 'web-search',
-        provider: 'deepseek-official',
-        credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
-        upstreamApiKey: searchKey,
-      },
-    });
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 1);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 1);
+        models: [{
+          id: luna.id,
+          apiMode: 'responses',
+          upstreamModelId: luna.upstreamModelId,
+          label: luna.label,
+          input: luna.input,
+          reasoning: true,
+          contextWindow: luna.contextWindow,
+          maxTokens: luna.maxTokens,
+        }],
+        searchCredentialGrant: {
+          schemaVersion: 1,
+          status: 'granted',
+          purpose: 'web-search',
+          provider: 'deepseek-official',
+          credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+          upstreamApiKey: searchKey,
+        },
+      });
+      assert.equal('upstreamBaseUrl' in releasedClientBody.models[0], false);
+      assert.equal('upstreamApiKey' in releasedClientBody.models[0], false);
+      assert.doesNotMatch(JSON.stringify(releasedClientBody.models), /provider-key|provider\.example/u);
+    }
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 2);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 2);
     assert.equal(keyCalls.includes(luna.id), false);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
-    assert.equal('upstreamBaseUrl' in releasedClientBody.models[0], false);
-    assert.equal('upstreamApiKey' in releasedClientBody.models[0], false);
-    assert.doesNotMatch(JSON.stringify(releasedClientBody.models), /provider-key|provider\.example/u);
 
     const legacyCases = [
       { clientVersion: null, searchStatus: 'granted' as const },

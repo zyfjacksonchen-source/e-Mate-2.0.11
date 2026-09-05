@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-tool-search",
-  "version": "2.0.17",
+  "version": "2.0.18",
   "description": "DSH-native progressive tool disclosure for e-Mate",
   "type": "module",
   "main": "lib/index.mjs",

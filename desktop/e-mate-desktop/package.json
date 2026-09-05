@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/desktop",
-  "version": "2.0.17",
+  "version": "2.0.18",
   "description": "e-Mate desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "publishConfig": {

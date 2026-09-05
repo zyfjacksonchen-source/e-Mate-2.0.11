@@ -2,9 +2,9 @@
 
 These rules are the repository's highest-priority engineering contract. Historical notes and evidence do not override them.
 
-The current source target for the e-Mate desktop application is version `2.0.17` in the GitHub repository `zyfjacksonchen-source/e-Mate-desktop`. The stable Electron product name and installed application name remain `e-Mate`; “Desktop” describes the repository scope and does not rename the app or its installation locations. This identity is not evidence that a candidate was built, installed, or publicly released.
+The current source target for the e-Mate desktop application is version `2.0.18` in the GitHub repository `zyfjacksonchen-source/e-Mate-desktop`. The stable Electron product name and installed application name remain `e-Mate`; “Desktop” describes the repository scope and does not rename the app or its installation locations. This identity is not evidence that a candidate was built, installed, or publicly released.
 
-At source level, 2.0.17 includes native `image_batch`, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This is a source capability and compatibility statement only; it makes no candidate, installed, or public-production claim.
+At source level, 2.0.18 includes native `image_batch`, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This is a source capability and compatibility statement only; it makes no candidate, installed, or public-production claim.
 
 ## First principle: sole main-agent governance
 
@@ -46,6 +46,11 @@ Subagents execute development only inside their assigned work order and write se
 - GitHub `e-Mate-desktop` is the source, review, and source-CI boundary. A commit, check, artifact, tag, or GitHub release does not by itself prove candidate installation or public production and is not a fallback release transport.
 - Fail closed at the first missing or mismatched gate. Keep it `OPEN`; never substitute source checks, fixtures, another candidate, historical receipts, or narrative approval. The main agent alone decides release or rollback.
 - Do not restore removed schema-2 signing orchestration, Profile hot-update publication, custom health rollback, local-flow coordinators, performance admission, or parallel package/update paths.
+
+## Private update acceptance and promotion
+
+- For the 2.0.18 release, use only the Desktop-owned private acceptance and same-byte promotion entry points specified in `docs/target-contract.md`. The canary launcher routes the existing native updater; it is not another updater or proof of installation.
+- Both platforms must supply real, same-source acceptance receipts before `desktop/e-mate-desktop/scripts/candidate-promotion-worker.mjs` may publish. No independent copy/version route or handwritten website success status may bypass this gate. These are required gates, not a claim that implementation review or release has passed.
 
 ## Worktree hygiene
 

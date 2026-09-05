@@ -247,7 +247,7 @@ test('managed profile installation is idempotent', () => {
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
     ])
-    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.17'])))
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.18'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
@@ -412,7 +412,7 @@ test('managed profile installation is idempotent', () => {
       const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
       const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
       assert.equal(pluginManifest.name, name)
-      assert.equal(pluginManifest.version, '2.0.17')
+      assert.equal(pluginManifest.version, '2.0.18')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
       const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
       assert.ok(pluginPatch.length >= 2)
@@ -3255,7 +3255,7 @@ test('enterprise identity provider maps target credentials and the production HT
       })
     }
     if (url.pathname.endsWith('/v1/runtime-models')) {
-      assert.equal(url.search, '?client_version=2.0.17')
+      assert.equal(url.search, '?client_version=2.0.18')
       return json(runtimeResponse)
     }
     if (url.pathname.endsWith('/v1/authenticated-probe')

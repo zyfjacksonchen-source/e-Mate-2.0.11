@@ -28,6 +28,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      - name: Check private update acceptance and gated promotion tools
+        run: node --test desktop/e-mate-desktop/scripts/candidate-update-worker.test.mjs desktop/e-mate-desktop/scripts/launch-update-canary.test.mjs desktop/e-mate-desktop/scripts/verify-update-acceptance.test.mjs desktop/e-mate-desktop/scripts/candidate-promotion-worker.test.mjs
       - uses: pnpm/action-setup@v4
       - run: corepack enable
       - name: Build pinned Harness and bundled e-Mate Profile

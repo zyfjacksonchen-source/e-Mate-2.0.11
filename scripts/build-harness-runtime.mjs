@@ -12,7 +12,7 @@ import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { HARNESS_COMMIT, HARNESS_VERSION, verifyHarnessBuildReceipt } from './harness-provenance.mjs'
 
-const PRODUCT_VERSION = '2.0.17'
+const PRODUCT_VERSION = '2.0.18'
 const PNPM_VERSION = '11.7.0'
 
 const root = resolve(import.meta.dirname, '..')

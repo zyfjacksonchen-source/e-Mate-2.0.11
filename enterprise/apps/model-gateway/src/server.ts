@@ -77,7 +77,7 @@ const managedCodexModelIds = new Set([
   'deepseek',
   'doubao-seed-2-0-pro-260215',
 ]);
-const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17']);
+const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17', '2.0.18']);
 const modelSessionJwtPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
 const deepSeekSearchCredentialRouteId = 'deepseek-web-search';
@@ -2138,7 +2138,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           throw new HttpError(400, 'UNSUPPORTED_CLIENT_VERSION', 'Unsupported runtime models client version');
         }
         const effectiveClientVersion = clientVersion ?? '2.0.12';
-        const legacyClient = effectiveClientVersion !== '2.0.17';
+        const legacyClient = effectiveClientVersion !== '2.0.17' && effectiveClientVersion !== '2.0.18';
         if (legacyClient && (identity.sessionId === undefined || !modelSessionJwtPattern.test(modelSessionToken))) {
           throw new HttpError(403, 'MODEL_SESSION_REQUIRED', 'A model session is required');
         }

@@ -856,7 +856,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const response = await modelCall(
       value,
-      '/v1/runtime-models?client_version=2.0.17',
+      '/v1/runtime-models?client_version=2.0.18',
       { method: 'GET' },
       'runtime models',
     )
@@ -1038,7 +1038,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.17',
+          clientVersion: '2.0.18',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)

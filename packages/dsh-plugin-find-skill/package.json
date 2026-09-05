@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-find-skill",
-  "version": "2.0.17",
+  "version": "2.0.18",
   "description": "e-Mate discovery adapter with allowlisted global external-connection bootstrap",
   "type": "module",
   "main": "lib/index.js",

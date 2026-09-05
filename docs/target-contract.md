@@ -1,11 +1,11 @@
-# e-Mate Desktop 2.0.17 target contract
+# e-Mate Desktop 2.0.18 target contract
 
 This is the active repository contract. It supersedes historical release-train notes, evidence matrices, and retired publication flows.
 
 ## Identity and pins
 
 - Product name: `e-Mate`
-- Product version: `2.0.17`
+- Product version: `2.0.18`
 - GitHub repository: `zyfjacksonchen-source/e-Mate-desktop`
 - DSH package baseline: `@deepseek-ai/dsh@0.1.0-rc.7`
 - Harness: `zyfjacksonchen-source/deepseek-harness@4da69d7c3522ee51de12822c917c503a124f7a7d`
@@ -13,7 +13,7 @@ This is the active repository contract. It supersedes historical release-train n
 
 ### Source capability and compatibility
 
-The 2.0.17 source capability/compatibility surface includes native `image_batch`, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This states source capability only and makes no candidate, installed, or public-production claim.
+The 2.0.18 source capability/compatibility surface includes native `image_batch`, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This states source capability only and makes no candidate, installed, or public-production claim.
 
 All maintained application source is TypeScript/TSX. Generated JavaScript and packaged assets are build output, not a second implementation.
 
@@ -49,6 +49,17 @@ Natural-language update requests only trigger `desktopUpdates.runInteractiveUpda
 - Online update accepts only a strictly newer stable SemVer. Same-version replacement uses the official manual download page.
 - Exact installer bytes must pass install, in-place replacement, and launch checks on both platforms before publication.
 
+## Private update acceptance and same-byte promotion
+
+These are required release gates, not evidence that the candidate or promotion implementation has passed review or been deployed. All entry points below belong to `desktop/e-mate-desktop/scripts`; the main agent retains all existing review, installed-acceptance, release, and rollback authority.
+
+1. **Candidate identity:** build real 2.0.18 binaries from one final source on native macOS and Codex Remote Windows. Retain the 2.0.17 fixes; never rename a 2.0.17 installer or change only its manifest to 2.0.18. Store the manifest and both installers privately under `desktop/candidates/<source_commit>/`, with full-byte readback and SHA-256 evidence.
+2. **Private discovery:** `candidate-update-worker.mjs` is the source-locked, expiring-token, read-only HTTPS reader for only `/desktop/version.json`, `/desktop/downloads/mac`, and `/desktop/downloads/windows`. `launch-update-canary.mjs` redirects only those three native update URLs; TLS verification remains enabled, original executable/archive/framework bytes remain unchanged, and the inspector must close. Tokens must not appear in logs or command-line arguments. Route readiness or an update prompt is not native-install acceptance.
+3. **Installed acceptance:** test the real 2.0.16-to-2.0.18 native download, in-place install, and normal launch on each platform, preserving the same installation path, `DSH_HOME`, userData, installation-id hash, and real test session throughout. Record actual download bytes/SHA-256, launched version, and closed debug port. Store both real receipts under the same private source. A broken, unlaunchable 2.0.17 installation also requires official 2.0.18 same-path manual replacement recovery; it cannot self-heal through a same-version 2.0.17 feed.
+4. **Single validation boundary:** `verify-update-acceptance.mjs <candidate-manifest.json> <mac-acceptance.json> <windows-acceptance.json>` invokes `update-acceptance-validation.mjs`. The promotion Worker must use that same validator on the private, fixed-source manifest and receipts before any public write. Missing/false/mismatched evidence must produce zero public writes; fixture success does not establish real acceptance.
+5. **Only promotion entry:** `candidate-promotion-worker.mjs` must require an explicitly expiring token and conditionally reserve a persistent private-R2 historical-highest-version record binding source and both installer hashes before the first public write. The main agent initializes historical 2.0.17 from real publication evidence; missing history fails closed. Reject downgrades, same-version different source/bytes, and concurrent candidate substitution; interrupted identical candidates may resume. Promote only the accepted bytes, read back immutable objects and aliases, and write the public version pointer last. Partial failures must report sanitized phase/operations, not falsely imply zero writes.
+6. **Completion:** after public activation, the Worker must persist its completion receipt under the same private source. The official website must consume that receipt, not a handwritten success status. Read back official version, platform pointers, and website against the accepted source/bytes, then remove temporary services and short-lived credentials under main-agent control. No separate copy/version publication route may bypass promotion.
+
 ## Compatibility boundaries
 
 - DSH `0.1.0-rc.7` is fixed. rc.8 packages, peers, fixtures, or inferred behavior are rejected.
@@ -63,4 +74,4 @@ Natural-language update requests only trigger `desktopUpdates.runInteractiveUpda
 3. **Installed:** those exact bytes install, replace in place, and launch on local macOS and the logged-in Codex Remote Windows machine. It proves no public activation.
 4. **Public production:** immutable Cloudflare/R2 objects plus the official version and platform pointers are activated and read back. GitHub state is not a substitute.
 
-Every gate fails closed at the first missing or mismatched fact. Tests and fixtures prove only their named boundary; another candidate, historical receipts, waivers, or narrative approval cannot fill a gap. This contract defines the `2.0.17` source target and makes no claim that installed acceptance, release, or rollback has occurred.
+Every gate fails closed at the first missing or mismatched fact. Tests and fixtures prove only their named boundary; another candidate, historical receipts, waivers, or narrative approval cannot fill a gap. This contract defines the `2.0.18` source target and makes no claim that installed acceptance, release, or rollback has occurred.

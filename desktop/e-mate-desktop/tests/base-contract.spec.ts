@@ -17,7 +17,7 @@ function contract(): Record<string, unknown> {
     runtime_imports: {
       '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7',
       '@deepseek-ai/dsh-settings': '0.1.0-rc.7',
-      '@e-mate/desktop/vision-toolkit': '2.0.17',
+      '@e-mate/desktop/vision-toolkit': '2.0.18',
       react: '18.3.1',
     },
   }
@@ -29,7 +29,7 @@ describe('Desktop Base contract', () => {
       schema_version: 1,
       harness_version: '0.1.0-rc.7',
       harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d',
-      runtime_imports: expect.objectContaining({ '@e-mate/desktop/vision-toolkit': '2.0.17' }),
+      runtime_imports: expect.objectContaining({ '@e-mate/desktop/vision-toolkit': '2.0.18' }),
     })
   })
 

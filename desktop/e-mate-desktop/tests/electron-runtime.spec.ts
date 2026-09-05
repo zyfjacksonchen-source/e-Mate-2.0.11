@@ -824,7 +824,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.17',
+        productVersion: '2.0.18',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
