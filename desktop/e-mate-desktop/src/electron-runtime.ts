@@ -13,6 +13,8 @@ import {
   Notification,
   shell,
   Tray,
+  type MessageBoxOptions,
+  type MessageBoxReturnValue,
 } from 'electron'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -422,6 +424,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     this.reportRendererBoot({ status: 'failed', plugins: [], error })
   }
 
+  private showUpdateMessageBox(options: MessageBoxOptions): Promise<MessageBoxReturnValue | undefined> {
+    const window = this.window
+    return window === undefined || window.isDestroyed()
+      ? Promise.resolve(undefined)
+      : dialog.showMessageBox(window, options)
+  }
+
   private async showRendererBootRecovery(report: Extract<RendererBootReport, { status: 'failed' }>): Promise<void> {
     const plugins = report.plugins.length === 0
       ? 'Unknown client plugin'
@@ -489,7 +498,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** Ask before making the fixed download endpoint's counted request. */
   private async confirmUpdateDownload(version: string): Promise<boolean> {
-    const result = await dialog.showMessageBox({
+    const result = await this.showUpdateMessageBox({
       type: 'info',
       title: '发现 e-Mate 更新',
       message: `e-Mate ${version} 已可更新。`,
@@ -501,13 +510,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       cancelId: 1,
       noLink: true,
     })
-    return result.response === 0
+    return result?.response === 0
   }
 
   /** Report one user-triggered check without exposing network or response details. */
   private async showManualUpdateCheckResult(result: UpdateCheckResult | null): Promise<void> {
     if (result === null) {
-      await dialog.showMessageBox({
+      await this.showUpdateMessageBox({
         type: 'warning',
         title: '无法检查更新',
         message: '暂时无法连接更新服务。',
@@ -520,7 +529,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     }
 
     if (result.status === 'up-to-date') {
-      await dialog.showMessageBox({
+      await this.showUpdateMessageBox({
         type: 'info',
         title: 'e-Mate 已是最新版本',
         message: '当前没有更新版本。',
@@ -532,7 +541,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       return
     }
 
-    await dialog.showMessageBox({
+    await this.showUpdateMessageBox({
       type: 'info',
       title: '发现 e-Mate 更新',
       message: `e-Mate ${result.latestVersion} 已可更新。`,
@@ -573,7 +582,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       const openError = await shell.openPath(artifactPath)
       if (openError !== '') throw new Error(`@e-mate/desktop: failed to open update disk image: ${openError}`)
       signal.throwIfAborted()
-      await dialog.showMessageBox({
+      await this.showUpdateMessageBox({
         type: 'info',
         title: 'e-Mate 更新已下载',
         message: `e-Mate ${version} 已准备好安装。`,
@@ -585,7 +594,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       return
     }
 
-    const result = await dialog.showMessageBox({
+    const result = await this.showUpdateMessageBox({
       type: 'info',
       title: 'e-Mate 更新已下载',
       message: `e-Mate ${version} 已准备好安装。`,
@@ -595,7 +604,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       cancelId: 1,
       noLink: true,
     })
-    if (result.response !== 0) return
+    if (result?.response !== 0) return
     const spec = this.scheduled
     if (spec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')
     signal.throwIfAborted()
@@ -623,7 +632,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const userDataPath = app.getPath('userData')
     const artifact = await pendingDesktopUpdateArtifact(userDataPath, PRODUCT_VERSION, this.platform)
     if (artifact === undefined) return
-    const result = await dialog.showMessageBox({
+    const result = await this.showUpdateMessageBox({
       type: 'question',
       title: '清理 e-Mate 安装包',
       message: `e-Mate ${artifact.version} 已安装。`,
@@ -633,6 +642,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       cancelId: 1,
       noLink: true,
     })
+    if (result === undefined) return
     await resolveDesktopUpdateArtifact(userDataPath, artifact, result.response === 0)
   }
 

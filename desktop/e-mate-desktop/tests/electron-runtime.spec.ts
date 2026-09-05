@@ -552,6 +552,62 @@ describe('Electron compatibility runtime', () => {
     expect(childProcess.child.unref).toHaveBeenCalledOnce()
   })
 
+  it('parents update cleanup to the live window and preserves artifacts without one', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const userData = mkdtempSync(join(tmpdir(), 'e-mate-update-window-'))
+    const installer = join(userData, 'e-Mate-2.0.17-mac.dmg')
+    const originalGetPath = electron.app.getPath.getMockImplementation()
+    electron.app.getPath.mockImplementation((name: string) => name === 'userData' ? userData : originalGetPath!(name))
+    writeFileSync(installer, 'installer')
+    try {
+      const { recordDesktopUpdateArtifact, pendingDesktopUpdateArtifact } = await import('../src/update-download.ts')
+      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+      const artifact = { platform: 'darwin' as const, version: '2.0.17', path: installer }
+      await recordDesktopUpdateArtifact(userData, artifact)
+      electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
+      const runtime = new ElectronDesktopRuntime(async () => {})
+      const showUpdateMessageBox = Reflect.get(runtime, 'showUpdateMessageBox') as (options: unknown) => Promise<unknown>
+
+      await expect(showUpdateMessageBox.call(runtime, { message: 'unowned update dialog' })).resolves.toBeUndefined()
+      expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
+
+      const release = runtime.schedule(spec)
+      await runtime.mountScheduled()
+      const window = electron.browserWindows[0]!
+      await vi.waitFor(() => { expect(electron.dialog.showMessageBox).toHaveBeenCalledOnce() })
+      expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(window, expect.objectContaining({
+        type: 'question',
+        title: '清理 e-Mate 安装包',
+        message: 'e-Mate 2.0.17 已安装。',
+        buttons: ['删除', '保留'],
+      }))
+      await vi.waitFor(async () => { expect(await pendingDesktopUpdateArtifact(userData, '2.0.17', 'darwin')).toBeUndefined() })
+      expect(existsSync(installer)).toBe(true)
+      await release()
+
+      await recordDesktopUpdateArtifact(userData, artifact)
+      electron.dialog.showMessageBox.mockClear()
+      let finishLoad!: () => void
+      electron.loadURL.mockImplementationOnce(() => new Promise<void>(resolve => { finishLoad = resolve }))
+      const destroyedRuntime = new ElectronDesktopRuntime(async () => {})
+      const destroyedRelease = destroyedRuntime.schedule(spec)
+      const mounted = destroyedRuntime.mountScheduled()
+      await vi.waitFor(() => { expect(electron.browserWindows).toHaveLength(2) })
+      electron.browserWindows[1]!.isDestroyed.mockReturnValue(true)
+      finishLoad()
+      await mounted
+      await new Promise(resolve => setImmediate(resolve))
+
+      expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
+      expect(existsSync(installer)).toBe(true)
+      await expect(pendingDesktopUpdateArtifact(userData, '2.0.17', 'darwin')).resolves.toEqual(artifact)
+      await destroyedRelease()
+    } finally {
+      electron.app.getPath.mockImplementation(originalGetPath!)
+      rmSync(userData, { recursive: true, force: true })
+    }
+  })
+
   it('opens one parented Windows folder chooser and returns its selected path', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     electron.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['C:\\Work'] })
