@@ -90,7 +90,7 @@ function Get-Windows {
   $rows=New-Object System.Collections.Generic.List[object]
   $callback=[EmateWin32+EnumWindowsProc]{ param($h,$unused) if ([EmateWin32]::IsWindowVisible($h)) { try { $f=Get-Frame $h; if ($f.width -gt 0 -and $f.height -gt 0) { $rows.Add($h) } } catch {} }; return $true }
   if (-not [EmateWin32]::EnumWindows($callback,[IntPtr]::Zero)) { throw "EnumWindows failed: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
-  return @($rows)
+  return $rows.ToArray()
 }
 function Resolve-App($selector) {
   $matches=@()
@@ -118,7 +118,7 @@ function Get-Tree([IntPtr]$hwnd,[int]$maxNodes,[int]$maxDepth,[int]$maxTextBytes
     $pattern=$null; if ($element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) { $actions.Add('AXPress') }
     $pattern=$null; if ($element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) { $actions.Add('AXSetValue'); try { $value=[string]$pattern.Current.Value } catch {} }
     $b=$element.Current.BoundingRectangle; $frame=$null; if (-not $b.IsEmpty -and $b.Width -gt 0 -and $b.Height -gt 0) { $frame=[ordered]@{x=$b.X;y=$b.Y;width=$b.Width;height=$b.Height} }
-    $item=[ordered]@{ index=$items.Count; locator=@($locator); role=$role; actions=@($actions); enabled=[bool]$element.Current.IsEnabled; focused=[bool]$element.Current.HasKeyboardFocus }
+    $item=[ordered]@{ index=$items.Count; locator=@($locator); role=$role; actions=$actions.ToArray(); enabled=[bool]$element.Current.IsEnabled; focused=[bool]$element.Current.HasKeyboardFocus }
     if ($name) { $item.label=$name }; if ($aid) { $item.nativeIdentifier=$aid }; if ($value.Length -gt 0) { $item.value=$value.Substring(0,[Math]::Min(8192,$value.Length)) }; if ($null -ne $frame) { $item.frame=$frame }
     $items.Add($item); $line=('['+$item.index+'] '+$role+$(if($name){' '+$name}else{''})); if ([Text.Encoding]::UTF8.GetByteCount(($lines -join "
 ")+"
@@ -126,7 +126,7 @@ function Get-Tree([IntPtr]$hwnd,[int]$maxNodes,[int]$maxDepth,[int]$maxTextBytes
     if ($depth -eq $maxDepth) { return }; $child=$walker.GetFirstChild($element); $i=0; while($null -ne $child) { Visit $child (@($locator)+$i) ($depth+1); if($items.Count -ge $maxNodes){break}; $child=$walker.GetNextSibling($child); $i++ }
   }
   Visit $root @() 0
-  return @{ root=$root; elements=@($items); text=($lines -join "
+  return @{ root=$root; elements=$items.ToArray(); text=($lines -join "
 "); truncated=[bool]$state.truncated }
 }
 function Get-StateHash($app,$window,$frontmost,$elements) { $canonical=([ordered]@{app=$app;window=$window;frontmost=[bool]$frontmost;elements=@($elements)}|ConvertTo-Json -Depth 40 -Compress); $sha=[Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
