@@ -47,7 +47,7 @@ public static class EmateWin32 {
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
   public static bool IsElevated(uint pid) { IntPtr p=OpenProcess(0x1000,false,pid),t=IntPtr.Zero; if(p==IntPtr.Zero)throw new System.ComponentModel.Win32Exception(); try { if(!OpenProcessToken(p,8,out t))throw new System.ComponentModel.Win32Exception(); int v,n; if(!GetTokenInformation(t,20,out v,4,out n))throw new System.ComponentModel.Win32Exception(); return v!=0; } finally { if(t!=IntPtr.Zero)CloseHandle(t);CloseHandle(p); } }
   public static bool InputDesktopAvailable() { IntPtr d=OpenInputDesktop(0,false,0x0100); if(d==IntPtr.Zero)return false; return CloseDesktop(d); }
-  public static long Pack(int x,int y) { return ((long)(y & 0xffff)<<16)|(long)(x & 0xffff); }
+  public static long Pack(int x,int y) { return ((uint)(y & 0xffff) << 16) | (uint)(x & 0xffff); }
   public static bool Send(IntPtr h,uint m,long w,long l) { IntPtr r; return SendMessageTimeout(h,m,(IntPtr)w,(IntPtr)l,2,2000,out r)!=IntPtr.Zero; }
 }
 '@ -ErrorAction Stop
@@ -75,13 +75,13 @@ function Get-Frame([IntPtr]$hwnd) {
   return [ordered]@{ x=$r.Left; y=$r.Top; width=$w; height=$h }
 }
 function Get-App([IntPtr]$hwnd) {
-  [uint32]$pid=0
-  if ([EmateWin32]::GetWindowThreadProcessId($hwnd,[ref]$pid) -eq 0 -or $pid -eq 0) { throw "GetWindowThreadProcessId failed: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
-  $process=[Diagnostics.Process]::GetProcessById([int]$pid)
+  [uint32]$targetProcessId=0
+  if ([EmateWin32]::GetWindowThreadProcessId($hwnd,[ref]$targetProcessId) -eq 0 -or $targetProcessId -eq 0) { throw "GetWindowThreadProcessId failed: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
+  $process=[Diagnostics.Process]::GetProcessById([int]$targetProcessId)
   try { $path=$process.MainModule.FileName; $start=$process.StartTime.ToUniversalTime().Ticks.ToString(); $name=$process.ProcessName }
   catch { throw 'target executable identity unavailable (elevated/UIPI target may require unavailable authority)' }
-  try { if ([EmateWin32]::IsElevated($pid)) { throw 'elevated/UIPI target is not supported' } } catch { throw "target integrity authority unavailable: $($_.Exception.Message)" }
-  return [ordered]@{ bundleId=$path.ToLowerInvariant(); pid=[int]$pid; name=$name; executablePath=$path; processStartTime=$start; windowId=$hwnd.ToInt64() }
+  try { if ([EmateWin32]::IsElevated($targetProcessId)) { throw 'elevated/UIPI target is not supported' } } catch { throw "target integrity authority unavailable: $($_.Exception.Message)" }
+  return [ordered]@{ bundleId=$path.ToLowerInvariant(); pid=[int]$targetProcessId; name=$name; executablePath=$path; processStartTime=$start; windowId=$hwnd.ToInt64() }
 }
 function Same-App($expected,$actual) {
   return ([int]$expected.pid -eq [int]$actual.pid -and [string]$expected.bundleId -ceq [string]$actual.bundleId -and [string]$expected.executablePath -ceq [string]$actual.executablePath -and [string]$expected.processStartTime -ceq [string]$actual.processStartTime -and [int64]$expected.windowId -eq [int64]$actual.windowId)
