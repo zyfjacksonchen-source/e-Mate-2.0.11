@@ -1,9 +1,10 @@
-import { Alert, Button, Drawer, Empty, Input, Link, Select, Spin, Tag } from '@arco-design/web-react';
-import { ChartHistogram, ChartLine, CheckOne, Home, Refresh, UserBusiness } from '@icon-park/react';
+import { Alert, Button, Drawer, Empty, Input, Link, Message, Select, Spin, Tag } from '@arco-design/web-react';
+import { ChartHistogram, ChartLine, CheckOne, Download, Home, Refresh, UserBusiness } from '@icon-park/react';
 import { Fragment, type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
-import type { TaskEventType, TaskScenario, TenantUsageEvent } from '@e-mate/monitoring-contract';
+import { TASK_SCENARIOS, type TaskEventType, type TaskScenario, type TenantUsageEvent } from '@e-mate/monitoring-contract';
 import eMateLogo from '../../../../packages/dsh/profile/plugins/emate-shell/assets/emate-logo.png';
 import {
+  loadAllUsageEvents,
   loadUsageDashboard,
   loadUsageEvents,
   loginUsageAccount,
@@ -33,6 +34,7 @@ import {
   usageUserTrend,
   usageUsers,
 } from './usage-data';
+import { createXlsxWorkbook } from './xlsx-export';
 
 const TOKEN_SESSION_KEY = 'e-mate.usage.access-token';
 const REFRESH_TOKEN_SESSION_KEY = 'e-mate.usage.refresh-token';
@@ -131,6 +133,7 @@ function maxCount(values: string[]): string {
 export function App() {
   const locale = navigator.language || 'zh-CN';
   const copy = messagesFor(locale);
+  const [message, messageHolder] = Message.useMessage();
   const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_SESSION_KEY) ?? '');
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
@@ -142,6 +145,7 @@ export function App() {
   const [customTo, setCustomTo] = useState(() => localDate(new Date()));
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [selectedScenarios, setSelectedScenarios] = useState<TaskScenario[]>([]);
   const [knownUsers, setKnownUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
   const [chartMetric, setChartMetric] = useState<ChartMetric>('activity');
   const [usageColumns, setUsageColumns] = useState<UsageColumn[]>(() => [...usageColumnKeys]);
@@ -154,6 +158,7 @@ export function App() {
   const [dayDetail, setDayDetail] = useState<DayDetailState>({ kind: 'idle' });
   const [eventsOpen, setEventsOpen] = useState(false);
   const [eventState, setEventState] = useState<EventState>({ kind: 'idle', events: [] });
+  const [exportBusy, setExportBusy] = useState(false);
   const pendingRefresh = useRef<Promise<UsageAuthSession> | null>(null);
   const customFromInput = useRef<HTMLInputElement>(null);
   const customToInput = useRef<HTMLInputElement>(null);
@@ -193,7 +198,11 @@ export function App() {
   useEffect(() => {
     if (!token) return;
     const controller = new AbortController();
-    const query = { ...range, ...(selectedUserIds.length ? { userIds: selectedUserIds } : {}) };
+    const query = {
+      ...range,
+      ...(selectedUserIds.length ? { userIds: selectedUserIds } : {}),
+      ...(selectedScenarios.length ? { scenarios: selectedScenarios } : {}),
+    };
     setDashboard({ kind: 'loading' });
     void loadUsageDashboard(token, query, controller.signal)
       .then((data) => {
@@ -224,13 +233,14 @@ export function App() {
             setToken('');
             setKnownUsers([]);
             setSelectedUserIds([]);
+            setSelectedScenarios([]);
             setTokenError(copy.authFailed);
           }
         }
         setDashboard({ kind: 'error', status });
       });
     return () => controller.abort();
-  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedUserIds, token]);
+  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedScenarios, selectedUserIds, token]);
 
   useEffect(() => {
     if (!token || !selectedDayQuery) {
@@ -310,6 +320,7 @@ export function App() {
         sessionStorage.setItem(REFRESH_TOKEN_SESSION_KEY, session.refreshToken);
         setKnownUsers([]);
         setSelectedUserIds([]);
+        setSelectedScenarios([]);
         setToken(session.accessToken);
         setPassword('');
       })
@@ -325,6 +336,7 @@ export function App() {
     setToken('');
     setKnownUsers([]);
     setSelectedUserIds([]);
+    setSelectedScenarios([]);
     if (!refreshToken) return;
     void logoutUsageAccount(
       {
@@ -399,8 +411,7 @@ export function App() {
   const models = projection ? usageModels(projection) : [];
   const userUsage = projection ? usageUsers(projection) : [];
   const displayNameByUserId = new Map(knownUsers.map(({ userId, displayName }) => [userId, displayName]));
-  const visibleAuditUserIds = ready?.users?.map(({ userId }) => userId) ?? [];
-  const scopedUserIds = selectedUserIds.length ? selectedUserIds : visibleAuditUserIds;
+  const scopedUserIds = ready?.scopedUserIds ?? selectedUserIds;
   const selectedUserSet = new Set(selectedUserIds);
   const userUsageById = new Map(userUsage.map((entry) => [entry.userId, entry]));
   const userEventCountById = new Map(
@@ -593,15 +604,17 @@ export function App() {
     }
     return tokenCount(row.metrics.totalTokens);
   };
-  const eventQuery = projection
-    ? (selectedDayQuery ?? {
+  const fullRangeEventQuery = projection
+    ? ({
         from: projection.from,
         to: projection.to,
         timezone: projection.timezone,
         bucket: projection.bucket,
         ...(scopedUserIds.length ? { userIds: scopedUserIds } : {}),
+        ...(selectedScenarios.length ? { scenarios: selectedScenarios } : {}),
       } satisfies UsageQuery)
     : null;
+  const eventQuery = selectedDayQuery ?? fullRangeEventQuery;
   const toggleDayDetail = (bucketStart: string) => {
     resetEvents();
     if (selectedDayQuery?.from === bucketStart) {
@@ -609,7 +622,13 @@ export function App() {
       return;
     }
     if (!projection) return;
-    setSelectedDayQuery(queryForDay(bucketStart, projection.to, projection.timezone, scopedUserIds));
+    setSelectedDayQuery(queryForDay(
+      bucketStart,
+      projection.to,
+      projection.timezone,
+      scopedUserIds,
+      selectedScenarios
+    ));
   };
   const loadEventPage = (cursor: string | null, existing: TenantUsageEvent[]) => {
     if (!projection || !eventQuery) return;
@@ -643,6 +662,100 @@ export function App() {
   const openEvents = () => {
     setEventsOpen(true);
     loadEventPage(null, []);
+  };
+  const exportEvents = () => {
+    if (!projection || !fullRangeEventQuery) return;
+    const controller = new AbortController();
+    setExportBusy(true);
+    void (async () => {
+      let accessToken = token;
+      let events: TenantUsageEvent[];
+      try {
+        events = await loadAllUsageEvents(
+          accessToken,
+          fullRangeEventQuery,
+          controller.signal,
+          projection.tenantId
+        );
+      } catch (error) {
+        if (!(error instanceof UsageApiError) || error.status !== 401) throw error;
+        try {
+          const session = await refreshUsageSession(controller.signal);
+          accessToken = session.accessToken;
+          setToken(accessToken);
+          events = await loadAllUsageEvents(
+            accessToken,
+            fullRangeEventQuery,
+            controller.signal,
+            projection.tenantId
+          );
+        } catch (refreshError) {
+          clearUsageSession();
+          setToken('');
+          throw refreshError;
+        }
+      }
+      const rows = events.map((event) => [
+        event.occurredAt,
+        `${event.kind === 'USAGE' ? copy.usageEvent : copy.requestEvent} · ${event.kind}`,
+        event.scenario ? `${scenarioLabels[event.scenario]} · ${event.scenario}` : copy.unlinkedScenario,
+        displayNameByUserId.get(event.userId) ?? event.userId,
+        event.userId,
+        event.taskId,
+        event.eventId,
+        event.traceId,
+        event.modelId,
+        event.providerId,
+        event.kind === 'REQUEST' ? event.outcome : '',
+        event.kind === 'USAGE' ? event.inputTokens : '',
+        event.kind === 'USAGE' ? event.outputTokens : '',
+        event.kind === 'USAGE' ? event.cacheReadTokens : '',
+        event.kind === 'USAGE' ? event.cacheWriteTokens : '',
+        event.kind === 'USAGE' ? event.totalTokens : '',
+        event.kind === 'USAGE' ? event.costUsd ?? '' : '',
+      ]);
+      const workbook = createXlsxWorkbook(copy.rawEvents, [[
+        `${copy.occurredAt} (ISO 8601)`,
+        copy.eventKind,
+        copy.scenario,
+        copy.user,
+        copy.userId,
+        copy.task,
+        copy.eventId,
+        copy.traceId,
+        copy.model,
+        copy.provider,
+        copy.outcome,
+        copy.inputTokens,
+        copy.outputTokens,
+        copy.cacheReadTokens,
+        copy.cacheWriteTokens,
+        copy.totalTokens,
+        `${copy.cost} (USD)`,
+      ], ...rows]);
+      const workbookBuffer = new ArrayBuffer(workbook.byteLength);
+      new Uint8Array(workbookBuffer).set(workbook);
+      const url = URL.createObjectURL(new Blob([workbookBuffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }));
+      const link = document.createElement('a');
+      link.href = url;
+      const from = localDate(new Date(fullRangeEventQuery.from));
+      const to = localDate(new Date(Date.parse(fullRangeEventQuery.to) - 1));
+      const scenario = fullRangeEventQuery.scenarios?.length === 1
+        ? `-${fullRangeEventQuery.scenarios[0].toLowerCase().replaceAll('_', '-')}`
+        : fullRangeEventQuery.scenarios?.length
+          ? `-${fullRangeEventQuery.scenarios.length}-scenarios`
+          : '';
+      link.download = `e-Mate-audit-${from}_to_${to}${scenario}.xlsx`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      message.success?.(copy.exportSuccess);
+    })()
+      .catch(() => message.error?.(copy.exportFailed))
+      .finally(() => setExportBusy(false));
   };
   const dayDetailPanel = selectedDayQuery ? (
     <section className='day-detail' aria-live='polite'>
@@ -712,7 +825,9 @@ export function App() {
     : '0';
 
   return (
-    <div className='dashboard-shell'>
+    <>
+      {messageHolder}
+      <div className='dashboard-shell'>
       <aside className='sidebar'>
         <div className='sidebar-brand'>
           <img src={eMateLogo} alt={copy.product} />
@@ -834,6 +949,26 @@ export function App() {
               ))}
             </Select>
           </label>
+          <div className='scenario-filter filter-field'>
+            <span>{copy.scenarioFilter}</span>
+            <Select
+              mode='multiple'
+              value={selectedScenarios}
+              placeholder={copy.allScenarios}
+              allowClear
+              maxTagCount={1}
+              onChange={(value) => {
+                resetEvents();
+                resetDayDetail();
+                setSelectedScenarios((value ?? []) as TaskScenario[]);
+              }}
+              aria-label={copy.scenarioFilter}
+            >
+              {TASK_SCENARIOS.map((scenario) => (
+                <Select.Option value={scenario} key={scenario}>{scenarioLabels[scenario]}</Select.Option>
+              ))}
+            </Select>
+          </div>
           {selectedUserIds.length > 0 && <Tag>{copy.filteredUsers}: {selectedUserIds.length}</Tag>}
         </section>
         {rangeError && <Alert className='dashboard-alert' type='error' content={rangeError} showIcon />}
@@ -1326,7 +1461,12 @@ export function App() {
                   {copy.mismatchCount}: {exactCount(mismatchCount, locale)} · {copy.checkedAt}{' '}
                   {dateTime(reconciliation.checkedAt)}
                 </span>
-                <Button onClick={openEvents}>{copy.viewEvents}</Button>
+                <div className='validation-buttons'>
+                  <Button icon={<Download />} loading={exportBusy} onClick={exportEvents}>
+                    {copy.exportDetails}
+                  </Button>
+                  <Button onClick={openEvents}>{copy.viewEvents}</Button>
+                </div>
               </div>
               {reconciliation.state === 'MISMATCHED' && (
                 <Alert type='warning' content={copy.unmatchedWarning} showIcon />
@@ -1369,6 +1509,10 @@ export function App() {
                     <dd>{event.taskId}</dd>
                   </div>
                   <div>
+                    <dt>{copy.scenario}</dt>
+                    <dd>{event.scenario ? scenarioLabels[event.scenario] : copy.unlinkedScenario}</dd>
+                  </div>
+                  <div>
                     <dt>{copy.model}</dt>
                     <dd>{event.modelId}</dd>
                   </div>
@@ -1401,6 +1545,7 @@ export function App() {
           ) : null}
         </div>
       </Drawer>
-    </div>
+      </div>
+    </>
   );
 }

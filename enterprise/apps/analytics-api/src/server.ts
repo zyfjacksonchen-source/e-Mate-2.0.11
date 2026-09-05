@@ -8,7 +8,7 @@ import {
 } from '@e-mate/observability-policy-contract';
 import { parseRuntimeRegistryHeartbeat, type RuntimeRegistryHeartbeat } from '@e-mate/runtime-registry-contract';
 import { parseSessionSummarySearchResult, parseSessionSummaryWrite } from '@e-mate/session-index-contract';
-import { parseMonitoringPeriod, type MonitoringPeriod } from '@e-mate/monitoring-contract';
+import { parseMonitoringPeriod, TASK_SCENARIOS, type MonitoringPeriod } from '@e-mate/monitoring-contract';
 import {
   parseAdminApiKeyCreate,
   parseAdminConsentQuery,
@@ -37,6 +37,7 @@ const policyWriteRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN']);
 const platformMonitoringRoles = new Set(['SUPER_ADMIN']);
 const usageRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN', 'AUDIT_ADMIN']);
 const managementRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN']);
+const taskScenarios = new Set<string>(TASK_SCENARIOS);
 
 export type AuthenticateBearer = (bearer: string) => Promise<RuntimeRegistryPrincipal | null>;
 
@@ -290,6 +291,7 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     'bucket',
     'userId',
     'modelId',
+    'scenario',
     ...(events ? ['cursor', 'limit'] : []),
   ]);
   if (
@@ -305,6 +307,7 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
   const bucket = url.searchParams.get('bucket') ?? 'DAY';
   const userIds = url.searchParams.getAll('userId');
   const modelId = url.searchParams.get('modelId');
+  const scenarios = url.searchParams.getAll('scenario');
   if (
     !from ||
     !to ||
@@ -317,7 +320,10 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     userIds.length > 100 ||
     new Set(userIds).size !== userIds.length ||
     userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId)) ||
-    (modelId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(modelId))
+    (modelId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(modelId)) ||
+    scenarios.length > TASK_SCENARIOS.length ||
+    new Set(scenarios).size !== scenarios.length ||
+    scenarios.some((scenario) => !taskScenarios.has(scenario))
   ) {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
   }
@@ -340,15 +346,17 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     bucket: bucket as UsageAnalyticsQuery['bucket'],
     ...(userIds.length ? { userIds } : {}),
     ...(modelId ? { modelId } : {}),
+    ...(scenarios.length ? { scenarios: scenarios as UsageAnalyticsQuery['scenarios'] } : {}),
   };
 }
 
 function taskEventQuery(url: URL): TaskEventQuery {
-  const allowed = new Set(['from', 'to', 'timezone', 'userId']);
+  const allowed = new Set(['from', 'to', 'timezone', 'userId', 'scenario']);
   if (
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
     ['from', 'to'].some((key) => url.searchParams.getAll(key).length !== 1) ||
     url.searchParams.getAll('timezone').length > 1 ||
+    url.searchParams.getAll('scenario').length > TASK_SCENARIOS.length ||
     url.searchParams.getAll('userId').length > 100
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
@@ -357,6 +365,7 @@ function taskEventQuery(url: URL): TaskEventQuery {
   const to = url.searchParams.get('to');
   const timezone = url.searchParams.get('timezone') ?? 'UTC';
   const userIds = url.searchParams.getAll('userId');
+  const scenarios = url.searchParams.getAll('scenario');
   if (
     !from ||
     !to ||
@@ -366,7 +375,9 @@ function taskEventQuery(url: URL): TaskEventQuery {
     timezone.length > 64 ||
     /\p{Cc}/u.test(timezone) ||
     new Set(userIds).size !== userIds.length ||
-    userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId))
+    userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId)) ||
+    new Set(scenarios).size !== scenarios.length ||
+    scenarios.some((scenario) => !taskScenarios.has(scenario))
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
@@ -381,7 +392,13 @@ function taskEventQuery(url: URL): TaskEventQuery {
   } catch {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
-  return { from, to, timezone, ...(userIds.length ? { userIds } : {}) };
+  return {
+    from,
+    to,
+    timezone,
+    ...(userIds.length ? { userIds } : {}),
+    ...(scenarios.length ? { scenarios: scenarios as TaskEventQuery['scenarios'] } : {}),
+  };
 }
 
 function usageEventPage(url: URL): { cursor: string | null; limit: number } {

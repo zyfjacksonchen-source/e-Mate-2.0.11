@@ -7,6 +7,7 @@ import {
   type TenantUsageEventPage,
   type TenantUsageProjection,
   type TenantUsageReconciliation,
+  type TaskScenario,
   type UsageBucket,
 } from '@e-mate/monitoring-contract';
 import { parseTenantUserList, type TenantUser } from '@e-mate/admin-contract';
@@ -17,6 +18,7 @@ export type UsageQuery = {
   timezone: string;
   bucket: UsageBucket;
   userIds?: string[];
+  scenarios?: readonly TaskScenario[];
 };
 
 export type UsageDashboardData = {
@@ -24,6 +26,7 @@ export type UsageDashboardData = {
   reconciliation: TenantUsageReconciliation;
   taskSummary: TenantTaskSummary;
   users: TenantUser[] | null;
+  scopedUserIds: string[];
 };
 
 export type UsagePasswordLogin = {
@@ -150,7 +153,8 @@ export function queryForDay(
   bucketStart: string,
   overallTo: string,
   timezone: string,
-  userIds: string[] = []
+  userIds: string[] = [],
+  scenarios: readonly TaskScenario[] = []
 ): UsageQuery {
   const from = new Date(bucketStart);
   const end = Math.min(from.getTime() + 86_400_000, Date.parse(overallTo));
@@ -163,6 +167,7 @@ export function queryForDay(
     timezone,
     bucket: 'DAY',
     ...(userIds.length ? { userIds: [...userIds] } : {}),
+    ...(scenarios.length ? { scenarios: [...scenarios] } : {}),
   };
 }
 
@@ -174,9 +179,10 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
     bucket: query.bucket,
   });
   for (const userId of query.userIds ?? []) parameters.append('userId', userId);
+  for (const scenario of query.scenarios ?? []) parameters.append('scenario', scenario);
   if (events) {
     if (cursor) parameters.set('cursor', cursor);
-    parameters.set('limit', '100');
+    parameters.set('limit', '200');
   }
   return parameters.toString();
 }
@@ -184,6 +190,7 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
 export function taskQueryString(query: UsageQuery): string {
   const parameters = new URLSearchParams({ from: query.from, to: query.to, timezone: query.timezone });
   for (const userId of query.userIds ?? []) parameters.append('userId', userId);
+  for (const scenario of query.scenarios ?? []) parameters.append('scenario', scenario);
   return parameters.toString();
 }
 
@@ -329,7 +336,7 @@ export function validateDashboardPair(
   projection: TenantUsageProjection,
   reconciliation: TenantUsageReconciliation,
   taskSummary: TenantTaskSummary
-): Omit<UsageDashboardData, 'users'> {
+): Omit<UsageDashboardData, 'users' | 'scopedUserIds'> {
   if (
     projection.tenantId !== reconciliation.tenantId ||
     projection.tenantId !== taskSummary.tenantId ||
@@ -389,6 +396,7 @@ export async function loadUsageDashboard(
       parseTenantTaskSummary(taskSummaryValue)
     ),
     users,
+    scopedUserIds: userIds,
   };
 }
 
@@ -406,6 +414,26 @@ export async function loadUsageEvents(
     query,
     expectedTenantId
   );
+}
+
+export async function loadAllUsageEvents(
+  token: string,
+  query: UsageQuery,
+  signal: AbortSignal,
+  expectedTenantId: string,
+  loadPage: typeof loadUsageEvents = loadUsageEvents
+): Promise<TenantUsageEventPage['events']> {
+  const events: TenantUsageEventPage['events'] = [];
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const page = await loadPage(token, query, cursor, signal, expectedTenantId);
+    events.push(...page.events);
+    if (!page.nextCursor) return events;
+    if (cursors.has(page.nextCursor)) throw new Error('Usage event pagination repeated a cursor');
+    cursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  } while (true);
 }
 
 export function validateUsageEventPage(

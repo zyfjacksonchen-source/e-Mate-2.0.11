@@ -17,6 +17,7 @@ import {
   queryForDay,
   queryForRange,
   queryForYesterday,
+  loadAllUsageEvents,
   loginUsageAccount,
   logoutUsageAccount,
   refreshUsageAccount,
@@ -231,21 +232,34 @@ test('adds event pagination only to event queries and preserves configured query
     timezone: 'Asia/Shanghai',
     bucket: 'DAY' as const,
     userIds: ['user-1', 'user-2'],
+    scenarios: ['CONTENT_CREATION', 'DOCUMENT_EDITING'] as const,
   };
   assert.equal(new URLSearchParams(usageQueryString(query)).has('limit'), false);
   assert.deepEqual(new URLSearchParams(usageQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
-  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to', 'timezone', 'userId', 'userId']);
+  assert.deepEqual(new URLSearchParams(usageQueryString(query)).getAll('scenario'), [
+    'CONTENT_CREATION', 'DOCUMENT_EDITING',
+  ]);
+  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], [
+    'from', 'to', 'timezone', 'userId', 'userId', 'scenario', 'scenario',
+  ]);
   assert.equal(new URLSearchParams(taskQueryString(query)).get('timezone'), 'Asia/Shanghai');
   assert.deepEqual(new URLSearchParams(taskQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
   assert.equal(new URLSearchParams(usageQueryString(query, true, 'cursor-1')).get('cursor'), 'cursor-1');
   assert.deepEqual(
-    queryForDay('2026-07-01T00:00:00.000Z', '2026-07-02T12:00:00.000Z', 'Asia/Shanghai', ['user-1']),
+    queryForDay(
+      '2026-07-01T00:00:00.000Z',
+      '2026-07-02T12:00:00.000Z',
+      'Asia/Shanghai',
+      ['user-1'],
+      ['CONTENT_CREATION', 'DOCUMENT_EDITING']
+    ),
     {
       from: '2026-07-01T00:00:00.000Z',
       to: '2026-07-02T00:00:00.000Z',
       timezone: 'Asia/Shanghai',
       bucket: 'DAY',
       userIds: ['user-1'],
+      scenarios: ['CONTENT_CREATION', 'DOCUMENT_EDITING'],
     }
   );
   assert.equal(
@@ -255,6 +269,82 @@ test('adds event pagination only to event queries and preserves configured query
   assert.throws(
     () => resolveSameOriginApiPath('https://other.test/', '/v1/usage/summary', 'https://example.test'),
     /share the dashboard origin/
+  );
+});
+
+test('loads every event page and rejects a repeated cursor', async () => {
+  const query = {
+    from: '2026-07-01T00:00:00.000Z',
+    to: '2026-07-02T00:00:00.000Z',
+    timezone: 'Asia/Shanghai',
+    bucket: 'DAY' as const,
+  };
+  const cursors: Array<string | null> = [];
+  const events = await loadAllUsageEvents(
+    'token',
+    query,
+    new AbortController().signal,
+    'tenant-a',
+    async (_token, _query, cursor) => {
+      cursors.push(cursor);
+      return {
+        schemaVersion: 1,
+        scope: 'TENANT',
+        tenantId: 'tenant-a',
+        from: query.from,
+        to: query.to,
+        events: cursor ? [{
+          kind: 'USAGE',
+          eventId: 'usage-1',
+          occurredAt: '2026-07-01T00:01:00.000Z',
+          userId: 'user-1',
+          taskId: 'task-1',
+          traceId: 'trace-1',
+          modelId: 'model-1',
+          providerId: 'provider-1',
+          scenario: 'CONTENT_CREATION',
+          inputTokens: '1',
+          outputTokens: '2',
+          cacheReadTokens: '3',
+          cacheWriteTokens: '4',
+          totalTokens: '10',
+          costUsd: '0.1',
+        }] : [{
+          kind: 'REQUEST',
+          eventId: 'request-1',
+          occurredAt: '2026-07-01T00:00:00.000Z',
+          userId: 'user-1',
+          taskId: 'task-1',
+          traceId: 'trace-1',
+          modelId: 'model-1',
+          providerId: 'provider-1',
+          scenario: 'CONTENT_CREATION',
+          outcome: 'ACCOUNTED',
+        }],
+        nextCursor: cursor ? null : 'cursor-1',
+      };
+    }
+  );
+  assert.deepEqual(cursors, [null, 'cursor-1']);
+  assert.deepEqual(events.map(({ eventId }) => eventId), ['request-1', 'usage-1']);
+
+  await assert.rejects(
+    () => loadAllUsageEvents(
+      'token',
+      query,
+      new AbortController().signal,
+      'tenant-a',
+      async () => ({
+        schemaVersion: 1,
+        scope: 'TENANT',
+        tenantId: 'tenant-a',
+        from: query.from,
+        to: query.to,
+        events: [],
+        nextCursor: 'same-cursor',
+      })
+    ),
+    /repeated a cursor/
   );
 });
 
@@ -321,6 +411,8 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
     'copy.viewEvents',
     'copy.customRange',
     'copy.userFilter',
+    'copy.scenarioFilter',
+    'copy.exportDetails',
     'copy.modelCallStatus',
     'copy.userTrend',
     'copy.scenarioTrend',
@@ -340,6 +432,8 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.match(source, /type='date'/);
   assert.doesNotMatch(source, /datetime-local/);
   assert.match(source, /mode='multiple'/);
+  assert.match(source, /value=\{selectedScenarios\}/);
+  assert.match(source, /setSelectedScenarios\(\(value \?\? \[\]\) as TaskScenario\[\]\)/);
   assert.match(source, /queryForDay/);
   assert.match(source, /usageUserTrend/);
   assert.match(source, /scenarioBuckets/);
@@ -350,6 +444,7 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.match(source, /selectedUserIds\.length \? \{ userIds: selectedUserIds \}/);
   assert.match(source, /eventTypeLabels\[type\].*type/);
   assert.match(source, /status === 401[\s\S]*refreshUsageSession/);
+  assert.match(source, /loadAllUsageEvents/);
   assert.doesNotMatch(source, /models\.slice/);
   assert.doesNotMatch(source, /eventState\.events[\s\S]{0,160}eventCount/);
   const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');

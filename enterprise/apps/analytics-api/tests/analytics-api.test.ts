@@ -316,7 +316,10 @@ async function withServer<T>(
             schemaVersion: 1,
             scope: 'TENANT',
             tenantId: identity.tenantId,
-            ...query,
+            from: query.from,
+            to: query.to,
+            timezone: query.timezone,
+            bucket: query.bucket,
             generatedAt: checkedAt,
             taskCount: '1',
             summary: metrics,
@@ -362,6 +365,7 @@ async function withServer<T>(
             traceId: 'trace-1',
             modelId: query.modelId ?? 'gpt-5.6-sol',
             providerId: 'openai',
+            scenario: query.scenarios?.[1] ?? query.scenarios?.[0] ?? null,
             inputTokens: '7',
             outputTokens: '3',
             cacheReadTokens: '2',
@@ -803,7 +807,8 @@ test('usage metrics are tenant-bound, exact and independently reconcilable', asy
       (await fetch(`${baseUrl}/v1/usage/summary?${query}`, { headers: auth('employee', false) })).status,
       403
     );
-    const summary = await fetch(`${baseUrl}/v1/usage/summary?${query}`, {
+    const scenarios = 'scenario=SEARCH_QUERY&scenario=CONTENT_CREATION';
+    const summary = await fetch(`${baseUrl}/v1/usage/summary?${query}&${scenarios}`, {
       headers: auth('auditor', false),
     });
     assert.equal(summary.status, 200);
@@ -829,16 +834,35 @@ test('usage metrics are tenant-bound, exact and independently reconcilable', asy
       zeroCostUsageEvents: '0',
       unpricedUsageEvents: '0',
     });
-    const reconciliation = await fetch(`${baseUrl}/v1/usage/reconciliation?${query}`, {
+    const reconciliation = await fetch(`${baseUrl}/v1/usage/reconciliation?${query}&${scenarios}`, {
       headers: auth('admin', false),
     });
     assert.equal(reconciliation.status, 200);
     assert.equal(((await reconciliation.json()) as { state: string }).state, 'MATCHED');
-    const events = await fetch(`${baseUrl}/v1/usage/events?${query}&limit=1`, {
+    const events = await fetch(`${baseUrl}/v1/usage/events?${query}&${scenarios}&limit=1`, {
       headers: auth('auditor', false),
     });
     assert.equal(events.status, 200);
-    assert.equal(((await events.json()) as { events: Array<{ eventId: string }> }).events[0]?.eventId, 'response-1');
+    assert.deepEqual(
+      ((await events.json()) as { events: Array<{ eventId: string; scenario: string | null }> }).events[0],
+      {
+        kind: 'USAGE',
+        eventId: 'response-1',
+        occurredAt: '2026-07-25T16:00:00.000Z',
+        userId: 'user-1',
+        taskId: 'task-1',
+        traceId: 'trace-1',
+        modelId: 'gpt-5.6-sol',
+        providerId: 'openai',
+        scenario: 'CONTENT_CREATION',
+        inputTokens: '7',
+        outputTokens: '3',
+        cacheReadTokens: '2',
+        cacheWriteTokens: '1',
+        totalTokens: '13',
+        costUsd: '0.100000000001',
+      }
+    );
     assert.equal(
       (
         await fetch(`${baseUrl}/v1/usage/summary?${query}&userId=user-1&userId=user-2`, {
@@ -861,6 +885,9 @@ test('usage metrics are tenant-bound, exact and independently reconcilable', asy
       `${query}&from=2026-07-24T00%3A00%3A00.000Z`,
       query.replace('Asia%2FShanghai', 'Mars%2FOlympus'),
       query.replace('2026-07-27T00%3A00%3A00.000Z', '2026-07-27T08%3A00%3A00%2B08%3A00'),
+      `${query}&scenario=UNKNOWN`,
+      `${query}&scenario=GENERAL&scenario=GENERAL`,
+      `${query}&scenario=GENERAL&scenario=CONTENT_CREATION&scenario=DOCUMENT_EDITING&scenario=SYSTEM_MAINTENANCE&scenario=ASSET_PRODUCTION&scenario=DATA_PROCESSING&scenario=SEARCH_QUERY&scenario=GENERAL`,
     ];
     const invalidStatuses = await Promise.all(
       invalidQueries.map(async (invalid) => {
